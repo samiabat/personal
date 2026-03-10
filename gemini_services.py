@@ -1,6 +1,6 @@
 import struct
 from google.genai import types
-from config import client
+from config import get_gemini_client
 
 def _parse_audio_mime_type(mime_type: str) -> dict:
     bits_per_sample, rate = 16, 24000
@@ -21,7 +21,6 @@ def _convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
     data_size = len(audio_data)
     block_align = channels * (bps // 8)
     byte_rate = rate * block_align
-    
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
         b"RIFF", 36 + data_size, b"WAVE", b"fmt ",
@@ -29,33 +28,30 @@ def _convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
     )
     return header + audio_data
 
-def generate_audio(text: str, output_path: str):
-    """Generates Charon voiceover and saves to output_path."""
+def generate_audio(text: str, output_path: str, model: str = "gemini-2.5-pro-preview-tts", voice: str = "Charon"):
+    """Generates voiceover and saves to output_path."""
+    client = get_gemini_client()
     tts_config = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Charon")
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
             )
         )
     )
-    
     response_stream = client.models.generate_content_stream(
-        model="gemini-2.5-pro-preview-tts",
+        model=model,
         contents=text,
         config=tts_config,
     )
-
     all_audio_data = bytearray()
     mime_type = "audio/L16;rate=24000"
-    
     for chunk in response_stream:
         if chunk.parts and chunk.parts[0].inline_data:
             inline_data = chunk.parts[0].inline_data
             all_audio_data.extend(inline_data.data)
             if inline_data.mime_type:
                 mime_type = inline_data.mime_type
-
     if all_audio_data:
         final_wav_bytes = _convert_to_wav(bytes(all_audio_data), mime_type)
         with open(output_path, "wb") as f:
@@ -63,20 +59,20 @@ def generate_audio(text: str, output_path: str):
         return True
     return False
 
-def generate_image(prompt: str, output_path: str):
-    """Generates a 16:9 image and saves to output_path."""
+def generate_image(prompt: str, output_path: str, model: str = "gemini-3.1-flash-image-preview", aspect_ratio: str = "16:9", image_size: str = "512"):
+    """Generates an image and saves to output_path."""
+    client = get_gemini_client()
     img_response = client.models.generate_content(
-        model='gemini-3.1-flash-image-preview',
+        model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             image_config=types.ImageConfig(
-                aspect_ratio="16:9", 
-                image_size="512"
+                aspect_ratio=aspect_ratio, 
+                image_size=image_size
             ),
         ),
     )
-    
     for part in img_response.parts:
         if part.inline_data:
             img = part.as_image()

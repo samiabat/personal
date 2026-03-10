@@ -1,14 +1,19 @@
 import os
 from dotenv import load_dotenv
-from google import genai
 
-# Load environment variables from the .env file
 load_dotenv()
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-if not API_KEY:
-    raise ValueError("GEMINI_API_KEY not found in .env file")
+def get_gemini_client():
+    from google import genai
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY not found in .env file")
+    return genai.Client(api_key=GEMINI_API_KEY)
 
-# Initialize the global client to be used across the app
-client = genai.Client(api_key=API_KEY)
+def get_openai_client():
+    from openai import OpenAI
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY not found in .env file")
+    return OpenAI(api_key=OPENAI_API_KEY)
