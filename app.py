@@ -46,6 +46,8 @@ class VideoRequest(BaseModel):
     togetherai_height: int = 576
     resolution: str = "1080p"
     enable_ken_burns: bool = False
+    enable_zoom: bool = False
+    enable_shake: bool = False
 
 class TestAudioRequest(BaseModel):
     text: str
@@ -147,6 +149,8 @@ def run_video_generation(job_id: str, request: VideoRequest):
             total_scenes, job_dir, "output.mp4",
             resolution=request.resolution,
             enable_ken_burns=request.enable_ken_burns,
+            enable_zoom=request.enable_zoom,
+            enable_shake=request.enable_shake,
         )
 
         # Clean up temp files

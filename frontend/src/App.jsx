@@ -37,7 +37,11 @@ function App() {
   const [imageSize, setImageSize] = useState('512')
   const [openaiImageSize, setOpenaiImageSize] = useState('1024x1024')
   const [togetheraiSize, setTogetheraiSize] = useState('1024x576')
-  const [enableKenBurns, setEnableKenBurns] = useState(false)
+  const [enableZoom, setEnableZoom] = useState(false)
+  const [enableShake, setEnableShake] = useState(false)
+
+  // Theme
+  const [darkMode, setDarkMode] = useState(true)
 
   // Job tracking
   const [jobId, setJobId] = useState(null)
@@ -181,7 +185,8 @@ function App() {
           togetherai_width: togDims.width,
           togetherai_height: togDims.height,
           resolution,
-          enable_ken_burns: enableKenBurns,
+          enable_zoom: enableZoom,
+          enable_shake: enableShake,
         }),
       })
 
@@ -455,7 +460,7 @@ function App() {
   )
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${darkMode ? 'theme-dark' : 'theme-light'}`}>
       {/* Top Navigation Bar */}
       <nav className="top-nav">
         <div className="nav-inner">
@@ -483,7 +488,10 @@ function App() {
               ⚙️ Settings
             </button>
           </div>
-          <div className="nav-user">
+          <div className="nav-actions">
+            <button className="theme-toggle-btn" onClick={() => setDarkMode(prev => !prev)} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
+              {darkMode ? '☀️' : '🌙'}
+            </button>
             <span className="nav-avatar">U</span>
           </div>
         </div>
@@ -581,24 +589,39 @@ function App() {
 
               <div className="settings-section">
                 <h3 className="section-title">🎞️ Video Settings</h3>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Output Resolution</label>
-                    <select value={resolution} onChange={e => setResolution(e.target.value)}>
-                      {models?.resolutions?.map(r => (
-                        <option key={r.value} value={r.value}>{r.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="toggle-label">
-                      Ken Burns Effect
-                      <span className="help-tooltip" title="Adds a very subtle slow zoom animation to images, making the video more dynamic. The effect is gentle to avoid cropping text or important content.">ℹ️</span>
-                    </label>
+                <div className="form-group">
+                  <label>Output Resolution</label>
+                  <select value={resolution} onChange={e => setResolution(e.target.value)}>
+                    {models?.resolutions?.map(r => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="effects-grid">
+                  <div className="effect-card">
+                    <div className="effect-header">
+                      <span className="effect-icon">🔍</span>
+                      <span className="effect-title">Gentle Zoom</span>
+                      <span className="help-tooltip" title="Adds a subtle slow zoom animation to each scene image.">ℹ️</span>
+                    </div>
+                    <p className="effect-desc">Slow cinematic zoom in/out on each scene</p>
                     <label className="switch-container">
-                      <input type="checkbox" checked={enableKenBurns} onChange={e => setEnableKenBurns(e.target.checked)} />
+                      <input type="checkbox" checked={enableZoom} onChange={e => setEnableZoom(e.target.checked)} />
                       <span className="switch-slider"></span>
-                      <span className="switch-label">{enableKenBurns ? 'Enabled — Gentle zoom & pan' : 'Disabled — Static images'}</span>
+                      <span className="switch-label">{enableZoom ? 'On' : 'Off'}</span>
+                    </label>
+                  </div>
+                  <div className="effect-card">
+                    <div className="effect-header">
+                      <span className="effect-icon">↔️</span>
+                      <span className="effect-title">Gentle Pan</span>
+                      <span className="help-tooltip" title="Adds a very subtle panning motion to each scene image.">ℹ️</span>
+                    </div>
+                    <p className="effect-desc">Subtle horizontal &amp; vertical drift</p>
+                    <label className="switch-container">
+                      <input type="checkbox" checked={enableShake} onChange={e => setEnableShake(e.target.checked)} />
+                      <span className="switch-slider"></span>
+                      <span className="switch-label">{enableShake ? 'On' : 'Off'}</span>
                     </label>
                   </div>
                 </div>
@@ -676,16 +699,33 @@ function App() {
                 </div>
 
                 {jobStatus === 'completed' && (
-                  <div className="download-area">
-                    <span style={{ fontSize: '2rem' }}>🎉</span>
-                    <div>
-                      <strong>Video Ready!</strong>
-                      <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>Your video has been generated successfully.</p>
+                  <>
+                    <div className="download-area">
+                      <span style={{ fontSize: '2rem' }}>🎉</span>
+                      <div>
+                        <strong>Video Ready!</strong>
+                        <p className="muted">Your video has been generated successfully.</p>
+                      </div>
+                      <button className="btn btn-success" onClick={downloadVideo}>
+                        ⬇️ Download Video
+                      </button>
                     </div>
-                    <button className="btn btn-success" onClick={downloadVideo}>
-                      ⬇️ Download Video
-                    </button>
-                  </div>
+
+                    {/* Inline Video Preview */}
+                    <div className="preview-section">
+                      <div className="preview-header">
+                        <h3>🎬 Preview</h3>
+                        <p className="muted">Watch your generated video right here</p>
+                      </div>
+                      <div className="preview-player">
+                        <video
+                          controls
+                          src={`${API_BASE}/download/${jobId}`}
+                          className="video-player"
+                        />
+                      </div>
+                    </div>
+                  </>
                 )}
 
                 {jobStatus === 'failed' && (
@@ -693,7 +733,7 @@ function App() {
                     <span style={{ fontSize: '1.5rem' }}>🔄</span>
                     <div>
                       <strong>Generation Failed</strong>
-                      <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>
+                      <p className="muted">
                         Already generated assets will be reused. Click retry to resume from where it stopped.
                       </p>
                     </div>
