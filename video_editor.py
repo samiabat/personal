@@ -8,7 +8,7 @@ def _create_ken_burns_clip(image_path: str, duration: float, target_size: tuple,
                            enable_zoom: bool = True, enable_shake: bool = True, fps: int = 24):
     """Create a clip with optional gentle zoom and/or pan (shake) effect.
 
-    Zoom and pan can be independently enabled.  When both are disabled the
+    Zoom and pan can be independently enabled. When both are disabled the
     caller should use a plain ``ImageClip`` instead, but this function will
     still return a valid static clip for safety.
     """

@@ -704,7 +704,7 @@ function App() {
                       <span style={{ fontSize: '2rem' }}>🎉</span>
                       <div>
                         <strong>Video Ready!</strong>
-                        <p style={{ fontSize: '0.85rem' }} className="muted">Your video has been generated successfully.</p>
+                        <p className="muted">Your video has been generated successfully.</p>
                       </div>
                       <button className="btn btn-success" onClick={downloadVideo}>
                         ⬇️ Download Video
@@ -733,7 +733,7 @@ function App() {
                     <span style={{ fontSize: '1.5rem' }}>🔄</span>
                     <div>
                       <strong>Generation Failed</strong>
-                      <p style={{ fontSize: '0.85rem' }} className="muted">
+                      <p className="muted">
                         Already generated assets will be reused. Click retry to resume from where it stopped.
                       </p>
                     </div>

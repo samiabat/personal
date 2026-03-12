@@ -27,6 +27,7 @@
   --warning: #f59e0b;
   --gradient-bg-1: rgba(99, 102, 241, 0.08);
   --gradient-bg-2: rgba(167, 139, 250, 0.06);
+  --video-player-bg: #000;
 }
 
 .theme-light {
@@ -57,6 +58,7 @@
   --warning: #d97706;
   --gradient-bg-1: rgba(99, 102, 241, 0.04);
   --gradient-bg-2: rgba(167, 139, 250, 0.03);
+  --video-player-bg: #111;
 }
 /* ─── SaaS Shell Layout ─── */
 .app-shell {
@@ -840,6 +842,7 @@ textarea.scene-editor {
 /* Muted text helper */
 .muted {
   color: var(--text-section);
+  font-size: 0.85rem;
 }
 
 /* Footer */
@@ -933,7 +936,7 @@ textarea.scene-editor {
   width: 100%;
   max-height: 480px;
   border-radius: 10px;
-  background: #000;
+  background: var(--video-player-bg);
   outline: none;
 }
 
