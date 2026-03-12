@@ -1,6 +1,6 @@
 import struct
 from google.genai import types
-from config import client
+from config import gemini_client as client
 
 def _parse_audio_mime_type(mime_type: str) -> dict:
     bits_per_sample, rate = 16, 24000

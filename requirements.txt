@@ -2,3 +2,7 @@ google-genai
 pillow
 moviepy
 python-dotenv
+flask
+openai
+together
+numpy

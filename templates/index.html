@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Pipeline Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --card: #1a1d27;
+      --border: #2a2d3a;
+      --accent: #6c63ff;
+      --accent-hover: #5a52e0;
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .header h1 { font-size: 1.4rem; font-weight: 600; }
+    .header .badge {
+      background: var(--accent);
+      color: #fff;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+    }
+    .container {
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 {
+      font-size: 1.1rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .card h2 .icon { font-size: 1.3rem; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .form-group.full { grid-column: 1 / -1; }
+    label {
+      font-size: 0.82rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    select, input[type="text"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.55rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border 0.2s;
+    }
+    select:focus, input[type="text"]:focus {
+      border-color: var(--accent);
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-row .info { display: flex; flex-direction: column; gap: 0.15rem; }
+    .toggle-row .info span:first-child { font-size: 0.92rem; }
+    .toggle-row .info span:last-child { font-size: 0.78rem; color: var(--muted); }
+    .switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 24px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+    .switch input:checked + .slider { background: var(--accent); }
+    .switch input:checked + .slider::before { transform: translateX(20px); }
+
+    .btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.7rem 1.8rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+      width: 100%;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Progress */
+    .progress-bar-bg {
+      background: var(--bg);
+      border-radius: 6px;
+      height: 10px;
+      overflow: hidden;
+      margin-top: 0.75rem;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 6px;
+      transition: width 0.5s ease;
+    }
+    #statusMessage {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    #errorMessage {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      color: var(--red);
+    }
+
+    /* Scene list */
+    .scene-list { max-height: 320px; overflow-y: auto; }
+    .scene-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .scene-item:last-child { border-bottom: none; }
+    .scene-num {
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 0.2rem 0.5rem;
+      font-weight: 600;
+      font-size: 0.8rem;
+      min-width: 28px;
+      text-align: center;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.ok { background: var(--green); }
+    .dot.missing { background: var(--red); }
+    .dot.partial { background: #f59e0b; }
+
+    /* Together AI model options (shown/hidden) */
+    .conditional { display: none; }
+    .conditional.visible { display: flex; }
+
+    @media (max-width: 640px) {
+      .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎬 Video Pipeline Dashboard</h1>
+    <span class="badge">v2</span>
+  </div>
+
+  <div class="container">
+    <!-- Image Provider Settings -->
+    <div class="card">
+      <h2><span class="icon">🖼️</span> Image Generation</h2>
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="imageProvider">Provider</label>
+          <select id="imageProvider" onchange="onProviderChange()">
+            <option value="gemini" {{ 'selected' if available_keys.gemini else '' }}>Gemini</option>
+            <option value="openai" {{ 'disabled' if not available_keys.openai else '' }}>OpenAI {{ '(no key)' if not available_keys.openai else '' }}</option>
+            <option value="together" {{ 'disabled' if not available_keys.together else '' }}>Together AI {{ '(no key)' if not available_keys.together else '' }}</option>
+          </select>
+        </div>
+
+        <!-- Gemini models -->
+        <div class="form-group" id="geminiModelGroup">
+          <label for="geminiModel">Model</label>
+          <select id="geminiModel">
+            <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
+          </select>
+        </div>
+
+        <!-- OpenAI models -->
+        <div class="form-group conditional" id="openaiModelGroup">
+          <label for="openaiModel">Model</label>
+          <select id="openaiModel">
+            <option value="gpt-image-1-mini">gpt-image-1-mini</option>
+            <option value="gpt-image-1" selected>gpt-image-1</option>
+            <option value="gpt-image-1.5">gpt-image-1.5</option>
+          </select>
+        </div>
+
+        <!-- Together AI models -->
+        <div class="form-group conditional" id="togetherModelGroup">
+          <label for="togetherModel">Model</label>
+          <select id="togetherModel">
+            {% for m in together_models %}
+            <option value="{{ m }}">{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Together AI size -->
+        <div class="form-group conditional" id="togetherSizeGroup">
+          <label for="togetherSize">Resolution</label>
+          <select id="togetherSize">
+            <option value="1024x576">1024 × 576</option>
+            <option value="1280x720">1280 × 720</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature Toggles -->
+    <div class="card">
+      <h2><span class="icon">⚙️</span> Pipeline Options</h2>
+
+      <div class="toggle-row">
+        <div class="info">
+          <span>Resume from failure</span>
+          <span>Skip scenes whose audio &amp; image already exist</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggleResume" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div class="info">
+          <span>Ken Burns effect (shake / zoom)</span>
+          <span>Adds subtle slow pan &amp; zoom on images for engaging motion</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggleShake">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Run Pipeline -->
+    <div class="card">
+      <h2><span class="icon">🚀</span> Generate Video</h2>
+      <button class="btn" id="btnGenerate" onclick="startPipeline()">Start Pipeline</button>
+      <div class="progress-bar-bg" id="progressBarBg" style="display:none;">
+        <div class="progress-bar-fill" id="progressBarFill" style="width:0%"></div>
+      </div>
+      <div id="statusMessage"></div>
+      <div id="errorMessage"></div>
+    </div>
+
+    <!-- Scene Status -->
+    <div class="card">
+      <h2><span class="icon">📋</span> Scenes</h2>
+      <div class="scene-list" id="sceneList">
+        <div style="color:var(--muted);font-size:.85rem;">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ---------- Provider / model switching ---------- */
+    function onProviderChange() {
+      const provider = document.getElementById('imageProvider').value;
+      document.getElementById('geminiModelGroup').style.display = provider === 'gemini' ? 'flex' : 'none';
+      document.getElementById('openaiModelGroup').style.display = provider === 'openai' ? 'flex' : 'none';
+      document.getElementById('togetherModelGroup').style.display = provider === 'together' ? 'flex' : 'none';
+      document.getElementById('togetherSizeGroup').style.display = provider === 'together' ? 'flex' : 'none';
+    }
+    onProviderChange();
+
+    /* ---------- Gather current model for selected provider ---------- */
+    function getSelectedModel() {
+      const provider = document.getElementById('imageProvider').value;
+      if (provider === 'gemini') return document.getElementById('geminiModel').value;
+      if (provider === 'openai') return document.getElementById('openaiModel').value;
+      if (provider === 'together') return document.getElementById('togetherModel').value;
+      return null;
+    }
+
+    /* ---------- Start pipeline ---------- */
+    function startPipeline() {
+      const btn = document.getElementById('btnGenerate');
+      btn.disabled = true;
+      btn.textContent = 'Running…';
+      document.getElementById('progressBarBg').style.display = 'block';
+      document.getElementById('errorMessage').textContent = '';
+
+      const payload = {
+        image_provider: document.getElementById('imageProvider').value,
+        image_model: getSelectedModel(),
+        together_size: document.getElementById('togetherSize').value,
+        enable_shake: document.getElementById('toggleShake').checked,
+        resume: document.getElementById('toggleResume').checked,
+      };
+
+      fetch('/api/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      }).then(r => r.json()).then(() => {
+        pollStatus();
+      }).catch(err => {
+        document.getElementById('errorMessage').textContent = err.message;
+        btn.disabled = false;
+        btn.textContent = 'Start Pipeline';
+      });
+    }
+
+    /* ---------- Poll status ---------- */
+    let pollTimer = null;
+    function pollStatus() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(() => {
+        fetch('/api/status').then(r => r.json()).then(data => {
+          const pct = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+          document.getElementById('progressBarFill').style.width = pct + '%';
+          document.getElementById('statusMessage').textContent = data.message || `${data.progress}/${data.total} scenes generated`;
+          if (data.error) {
+            document.getElementById('errorMessage').textContent = data.error;
+          }
+          if (!data.running) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            document.getElementById('btnGenerate').disabled = false;
+            document.getElementById('btnGenerate').textContent = 'Start Pipeline';
+            loadScenes();
+          }
+        });
+      }, 2000);
+    }
+
+    /* ---------- Load scene status ---------- */
+    function loadScenes() {
+      fetch('/api/scenes').then(r => r.json()).then(scenes => {
+        const list = document.getElementById('sceneList');
+        list.innerHTML = '';
+        scenes.forEach(s => {
+          const both = s.audio_exists && s.image_exists;
+          const none = !s.audio_exists && !s.image_exists;
+          const cls = both ? 'ok' : (none ? 'missing' : 'partial');
+          const el = document.createElement('div');
+          el.className = 'scene-item';
+          el.innerHTML = `
+            <span class="scene-num">${s.index + 1}</span>
+            <span class="dot ${cls}"></span>
+            <span style="flex:1">${s.voiceover}</span>
+            <span style="font-size:.75rem;color:var(--muted)">
+              🔊 ${s.audio_exists ? '✓' : '✗'} &nbsp; 🖼️ ${s.image_exists ? '✓' : '✗'}
+            </span>
+          `;
+          list.appendChild(el);
+        });
+      });
+    }
+    loadScenes();
+  </script>
+</body>
+</html>
