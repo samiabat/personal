@@ -2,3 +2,8 @@ google-genai
 pillow
 moviepy
 python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart
+openai
+sse-starlette

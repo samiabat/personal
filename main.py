@@ -24,26 +24,20 @@ def main():
     for index, scene in enumerate(scenes):
         print(f"--- Processing Scene {index + 1}/{len(scenes)} ---")
         
-        
         audio_path = f"{ASSET_DIR}/scene_{index}_audio.wav"
         image_path = f"{ASSET_DIR}/scene_{index}_image.jpg"
         
-        # 1. Generate Audio
-        # if index > 21:
         print("Generating voiceover...")
         generate_audio(scene["voiceover"], audio_path)
         
-        # 2. Generate Image
         print("Generating image...")
         generate_image(scene["prompt"], image_path)
         print(f"Assets for Scene {index + 1} generated successfully.\n")
         
-    # 3. Assemble Video
     print("Building final video...")
     output_path = assemble_final_video(len(scenes), ASSET_DIR, "final_trading_short.mp4")
     print(f"\nSUCCESS! Video saved as: {output_path}")
     
-    # 4. Clean up (Optional, comment out if you want to keep the raw images/audio)
     cleanup_temp_files(len(scenes))
 
 if __name__ == "__main__":
