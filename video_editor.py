@@ -5,28 +5,33 @@ from moviepy import AudioFileClip, ImageClip, VideoClip, concatenate_videoclips
 
 
 def _create_ken_burns_clip(image_path: str, duration: float, target_size: tuple, fps: int = 24):
-    """Create a clip with a slow zoom + pan (Ken Burns) effect to add visual motion."""
+    """Create a clip with a very gentle zoom + pan (Ken Burns) effect to add visual motion.
+
+    The effect is intentionally subtle — a tiny, slow zoom with minimal panning —
+    so that text and other details in the image are never cropped or distorted.
+    """
     img = Image.open(image_path).convert("RGB")
     w, h = target_size
 
-    # Resize image to be significantly larger than target for cropping headroom
-    scale = max(w / img.width, h / img.height) * 1.25
+    # Only slightly larger than target so the visible area stays close to the
+    # full image, keeping text and details safe from being cropped.
+    scale = max(w / img.width, h / img.height) * 1.08
     new_w, new_h = int(img.width * scale), int(img.height * scale)
     img_resized = img.resize((new_w, new_h), Image.LANCZOS)
     img_array = np.array(img_resized)
 
-    # Randomly choose zoom direction (in or out) and pan direction
+    # Randomly choose zoom direction (in or out) — very small range
     zoom_in = random.choice([True, False])
-    zoom_start = 1.0 if zoom_in else 1.15
-    zoom_end = 1.15 if zoom_in else 1.0
+    zoom_start = 1.0 if zoom_in else 1.04
+    zoom_end = 1.04 if zoom_in else 1.0
 
-    # Random pan offsets (small, subtle movement)
-    pan_x_range = (new_w - w) * 0.3
-    pan_y_range = (new_h - h) * 0.15
-    pan_x_start = random.uniform(-pan_x_range, pan_x_range) * 0.5
-    pan_x_end = random.uniform(-pan_x_range, pan_x_range) * 0.5
-    pan_y_start = random.uniform(-pan_y_range, pan_y_range) * 0.3
-    pan_y_end = random.uniform(-pan_y_range, pan_y_range) * 0.3
+    # Very subtle pan offsets to avoid cropping text or important content
+    pan_x_range = (new_w - w) * 0.1
+    pan_y_range = (new_h - h) * 0.05
+    pan_x_start = random.uniform(-pan_x_range, pan_x_range) * 0.3
+    pan_x_end = random.uniform(-pan_x_range, pan_x_range) * 0.3
+    pan_y_start = random.uniform(-pan_y_range, pan_y_range) * 0.15
+    pan_y_end = random.uniform(-pan_y_range, pan_y_range) * 0.15
 
     def make_frame(t):
         progress = t / max(duration, 0.001)
