@@ -1,5 +1,9 @@
+import os
 import struct
+import base64
+from io import BytesIO
 from google.genai import types
+from PIL import Image
 from config import client
 
 def _parse_audio_mime_type(mime_type: str) -> dict:
@@ -64,7 +68,7 @@ def generate_audio(text: str, output_path: str):
     return False
 
 def generate_image(prompt: str, output_path: str):
-    """Generates a 16:9 image and saves to output_path."""
+    """Generates a 16:9 image using Gemini and saves to output_path."""
     img_response = client.models.generate_content(
         model='gemini-3.1-flash-image-preview',
         contents=prompt,
@@ -83,3 +87,88 @@ def generate_image(prompt: str, output_path: str):
             img.save(output_path)
             return True
     return False
+
+def generate_image_openai(prompt: str, output_path: str, model: str = "gpt-image-1"):
+    """Generates an image using OpenAI and saves to output_path."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not found in .env file. Required for OpenAI image generation.")
+
+    from openai import OpenAI
+    openai_client = OpenAI(api_key=api_key)
+
+    result = openai_client.images.generate(
+        model=model,
+        prompt=prompt,
+        size="1536x1024",
+    )
+
+    image_url = result.data[0].url
+    if result.data[0].b64_json:
+        image_data = base64.b64decode(result.data[0].b64_json)
+        img = Image.open(BytesIO(image_data))
+    else:
+        import urllib.request
+        with urllib.request.urlopen(image_url) as resp:
+            img = Image.open(BytesIO(resp.read()))
+
+    img.save(output_path)
+    return True
+
+def generate_image_togetherai(prompt: str, output_path: str,
+                               model: str = "black-forest-labs/FLUX.1-schnell",
+                               width: int = 1024, height: int = 576):
+    """Generates an image using Together AI and saves to output_path.
+    
+    Note: The 'steps' parameter is intentionally not used per API requirements.
+    """
+    api_key = os.getenv("TOGETHER_API_KEY")
+    if not api_key:
+        raise ValueError("TOGETHER_API_KEY not found in .env file. Required for Together AI image generation.")
+
+    from together import Together
+    together_client = Together(api_key=api_key)
+
+    response = together_client.images.generate(
+        prompt=prompt,
+        model=model,
+        width=width,
+        height=height,
+    )
+
+    if response.data[0].b64_json:
+        image_data = base64.b64decode(response.data[0].b64_json)
+        img = Image.open(BytesIO(image_data))
+    else:
+        import urllib.request
+        with urllib.request.urlopen(response.data[0].url) as resp:
+            img = Image.open(BytesIO(resp.read()))
+
+    img.save(output_path)
+    return True
+
+def generate_image_with_provider(prompt: str, output_path: str,
+                                  provider: str = "gemini",
+                                  model: str = None,
+                                  width: int = 1024, height: int = 576):
+    """Dispatches image generation to the selected provider.
+    
+    Args:
+        prompt: The image generation prompt.
+        output_path: Path to save the generated image.
+        provider: One of 'gemini', 'openai', 'togetherai'.
+        model: Model name (provider-specific). Uses default if None.
+        width: Image width (Together AI only).
+        height: Image height (Together AI only).
+    """
+    if provider == "gemini":
+        return generate_image(prompt, output_path)
+    elif provider == "openai":
+        m = model or "gpt-image-1"
+        return generate_image_openai(prompt, output_path, model=m)
+    elif provider == "togetherai":
+        m = model or "black-forest-labs/FLUX.1-schnell"
+        return generate_image_togetherai(prompt, output_path, model=m,
+                                          width=width, height=height)
+    else:
+        raise ValueError(f"Unknown image provider: {provider}. Choose from: gemini, openai, togetherai")
