@@ -15,7 +15,7 @@ const DEFAULT_SCENES_EXAMPLE = `[
 ]`
 
 function App() {
-  const [activeTab, setActiveTab] = useState('generate')
+  const [activeTab, setActiveTab] = useState('create')
   const [models, setModels] = useState(null)
   const [error, setError] = useState('')
 
@@ -322,416 +322,596 @@ function App() {
 
   const sceneInfo = scenesText ? parseScenes() : { valid: false, count: 0, error: null }
 
-  return (
-    <div className="app">
-      {/* Hero Header */}
-      <header className="app-header">
-        <div className="logo">
-          <span className="logo-icon">🎬</span>
-          <span className="logo-text">VideoForge<span className="logo-ai">AI</span></span>
+  // Speech settings block (reusable)
+  const renderSpeechSettings = () => (
+    <>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Speech Provider</label>
+          <select value={speechProvider} onChange={e => setSpeechProvider(e.target.value)}>
+            {models?.speech_providers.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
         </div>
-        <p className="app-subtitle">Transform your ideas into stunning AI-generated videos in minutes</p>
-        <div className="header-badges">
-          <span className="badge">Multi-Provider</span>
-          <span className="badge">Ken Burns Effect</span>
-          <span className="badge">Auto-Resume</span>
+        <div className="form-group">
+          <label>
+            Speech Model
+            <label className="custom-toggle">
+              <input type="checkbox" checked={useCustomSpeechModel} onChange={e => setUseCustomSpeechModel(e.target.checked)} />
+              Custom
+            </label>
+          </label>
+          {useCustomSpeechModel ? (
+            <input type="text" placeholder="Enter custom model name..." value={customSpeechModel} onChange={e => setCustomSpeechModel(e.target.value)} />
+          ) : (
+            <select value={speechModel} onChange={e => setSpeechModel(e.target.value)}>
+              {models?.speech_models[speechProvider]?.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          )}
         </div>
-      </header>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label>
+            Voice
+            <label className="custom-toggle">
+              <input type="checkbox" checked={useCustomVoice} onChange={e => setUseCustomVoice(e.target.checked)} />
+              Custom
+            </label>
+          </label>
+          {useCustomVoice ? (
+            <input type="text" placeholder="Enter custom voice name..." value={customVoice} onChange={e => setCustomVoice(e.target.value)} />
+          ) : (
+            <select value={speechVoice} onChange={e => setSpeechVoice(e.target.value)}>
+              {models?.speech_voices[speechProvider]?.map(v => (
+                <option key={v.value} value={v.value}>{v.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+    </>
+  )
 
-      {error && (
-        <div className="alert alert-error">
-          <span>⚠️ {error}</span>
-          <button onClick={() => setError('')} className="alert-close">✕</button>
+  // Image settings block (reusable)
+  const renderImageSettings = () => (
+    <>
+      <div className="form-row">
+        <div className="form-group">
+          <label>Image Provider</label>
+          <select value={imageProvider} onChange={e => setImageProvider(e.target.value)}>
+            {models?.image_providers?.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>
+            Image Model
+            <label className="custom-toggle">
+              <input type="checkbox" checked={useCustomImageModel} onChange={e => setUseCustomImageModel(e.target.checked)} />
+              Custom
+            </label>
+          </label>
+          {useCustomImageModel ? (
+            <input type="text" placeholder="Enter custom image model name..." value={customImageModel} onChange={e => setCustomImageModel(e.target.value)} />
+          ) : (
+            <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
+              {models?.image_models?.[imageProvider]?.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+      {imageProvider === 'gemini' && (
+        <div className="form-row">
+          <div className="form-group">
+            <label>Aspect Ratio</label>
+            <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value)}>
+              {models?.aspect_ratios?.map(a => (
+                <option key={a.value} value={a.value}>{a.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Image Size</label>
+            <select value={imageSize} onChange={e => setImageSize(e.target.value)}>
+              <option value="256">256px</option>
+              <option value="512">512px</option>
+              <option value="1024">1024px</option>
+            </select>
+          </div>
         </div>
       )}
-
-      <div className="tabs">
-        <button className={`tab-btn ${activeTab === 'generate' ? 'active' : ''}`} onClick={() => setActiveTab('generate')}>
-          🎥 Generate Video
-        </button>
-        <button className={`tab-btn ${activeTab === 'test' ? 'active' : ''}`} onClick={() => setActiveTab('test')}>
-          🧪 Test Audio / Image
-        </button>
-      </div>
-
-      {/* Settings Card - Shared between tabs */}
-      <div className="card">
-        <div className="card-header">
-          <h2>⚙️ Model Settings</h2>
-          <span className="card-badge">Configuration</span>
-        </div>
-
-        {/* Speech Settings Section */}
-        <div className="settings-section">
-          <h3 className="section-title">🔊 Speech Settings</h3>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Speech Provider</label>
-              <select value={speechProvider} onChange={e => setSpeechProvider(e.target.value)}>
-                {models?.speech_providers.map(p => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>
-                Speech Model
-                <label className="custom-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useCustomSpeechModel}
-                    onChange={e => setUseCustomSpeechModel(e.target.checked)}
-                  />
-                  Custom
-                </label>
-              </label>
-              {useCustomSpeechModel ? (
-                <input
-                  type="text"
-                  placeholder="Enter custom model name..."
-                  value={customSpeechModel}
-                  onChange={e => setCustomSpeechModel(e.target.value)}
-                />
-              ) : (
-                <select value={speechModel} onChange={e => setSpeechModel(e.target.value)}>
-                  {models?.speech_models[speechProvider]?.map(m => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label>
-                Voice
-                <label className="custom-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useCustomVoice}
-                    onChange={e => setUseCustomVoice(e.target.checked)}
-                  />
-                  Custom
-                </label>
-              </label>
-              {useCustomVoice ? (
-                <input
-                  type="text"
-                  placeholder="Enter custom voice name..."
-                  value={customVoice}
-                  onChange={e => setCustomVoice(e.target.value)}
-                />
-              ) : (
-                <select value={speechVoice} onChange={e => setSpeechVoice(e.target.value)}>
-                  {models?.speech_voices[speechProvider]?.map(v => (
-                    <option key={v.value} value={v.value}>{v.label}</option>
-                  ))}
-                </select>
-              )}
-            </div>
+      {imageProvider === 'openai' && (
+        <div className="form-row">
+          <div className="form-group">
+            <label>Image Size</label>
+            <select value={openaiImageSize} onChange={e => setOpenaiImageSize(e.target.value)}>
+              {models?.openai_image_sizes?.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
         </div>
-
-        {/* Image Settings Section */}
-        <div className="settings-section">
-          <h3 className="section-title">🖼️ Image Settings</h3>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Image Provider</label>
-              <select value={imageProvider} onChange={e => setImageProvider(e.target.value)}>
-                {models?.image_providers?.map(p => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>
-                Image Model
-                <label className="custom-toggle">
-                  <input
-                    type="checkbox"
-                    checked={useCustomImageModel}
-                    onChange={e => setUseCustomImageModel(e.target.checked)}
-                  />
-                  Custom
-                </label>
-              </label>
-              {useCustomImageModel ? (
-                <input
-                  type="text"
-                  placeholder="Enter custom image model name..."
-                  value={customImageModel}
-                  onChange={e => setCustomImageModel(e.target.value)}
-                />
-              ) : (
-                <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
-                  {models?.image_models?.[imageProvider]?.map(m => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-
-          {/* Provider-specific image settings */}
-          {imageProvider === 'gemini' && (
-            <div className="form-row">
-              <div className="form-group">
-                <label>Aspect Ratio</label>
-                <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value)}>
-                  {models?.aspect_ratios?.map(a => (
-                    <option key={a.value} value={a.value}>{a.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Image Size</label>
-                <select value={imageSize} onChange={e => setImageSize(e.target.value)}>
-                  <option value="256">256px</option>
-                  <option value="512">512px</option>
-                  <option value="1024">1024px</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {imageProvider === 'openai' && (
-            <div className="form-row">
-              <div className="form-group">
-                <label>Image Size</label>
-                <select value={openaiImageSize} onChange={e => setOpenaiImageSize(e.target.value)}>
-                  {models?.openai_image_sizes?.map(s => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-
-          {imageProvider === 'togetherai' && (
-            <div className="form-row">
-              <div className="form-group">
-                <label>Image Dimensions</label>
-                <select value={togetheraiSize} onChange={e => setTogetheraiSize(e.target.value)}>
-                  {models?.togetherai_sizes?.map(s => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Video Settings Section */}
-        <div className="settings-section">
-          <h3 className="section-title">🎞️ Video Settings</h3>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Output Resolution</label>
-              <select value={resolution} onChange={e => setResolution(e.target.value)}>
-                {models?.resolutions?.map(r => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="toggle-label">
-                Ken Burns Effect
-                <span className="help-tooltip" title="Adds a subtle slow zoom and pan animation to images, making the video more dynamic and engaging instead of static images.">ℹ️</span>
-              </label>
-              <label className="switch-container">
-                <input
-                  type="checkbox"
-                  checked={enableKenBurns}
-                  onChange={e => setEnableKenBurns(e.target.checked)}
-                />
-                <span className="switch-slider"></span>
-                <span className="switch-label">{enableKenBurns ? 'Enabled — Dynamic zoom & pan' : 'Disabled — Static images'}</span>
-              </label>
-            </div>
+      )}
+      {imageProvider === 'togetherai' && (
+        <div className="form-row">
+          <div className="form-group">
+            <label>Image Dimensions</label>
+            <select value={togetheraiSize} onChange={e => setTogetheraiSize(e.target.value)}>
+              {models?.togetherai_sizes?.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
         </div>
-      </div>
+      )}
+    </>
+  )
 
-      {/* Generate Tab */}
-      {activeTab === 'generate' && (
-        <>
-          <div className="card">
-            <div className="card-header">
-              <h2>📝 Scenes</h2>
-              <div className="btn-group">
-                <button className="btn btn-secondary btn-sm" onClick={loadDefaultScenes}>
-                  Load Default Scenes
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_SCENES_EXAMPLE)}>
-                  Load Example Template
-                </button>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                <label style={{ margin: 0 }}>Paste your scenes JSON array below</label>
-                {scenesText && (
-                  <span className={`scene-count ${sceneInfo.valid ? 'valid' : 'invalid'}`}>
-                    {sceneInfo.valid ? `✓ ${sceneInfo.count} scenes` : `✗ ${sceneInfo.error}`}
-                  </span>
-                )}
-              </div>
-              <textarea
-                className="scene-editor"
-                placeholder={DEFAULT_SCENES_EXAMPLE}
-                value={scenesText}
-                onChange={e => setScenesText(e.target.value)}
-              />
-              <p className="help-text">
-                Each scene needs a &quot;voiceover&quot; (text for speech) and a &quot;prompt&quot; (text for image generation).
-              </p>
-            </div>
-
-            <button
-              className="btn btn-primary btn-block btn-glow"
-              disabled={!sceneInfo.valid || isGenerating}
-              onClick={startGeneration}
-            >
-              {isGenerating ? (
-                <><span className="spinner"></span> Generating...</>
-              ) : (
-                <>🚀 Generate Video</>
-              )}
+  return (
+    <div className="app-shell">
+      {/* Top Navigation Bar */}
+      <nav className="top-nav">
+        <div className="nav-inner">
+          <div className="nav-brand" onClick={() => setActiveTab('dashboard')}>
+            <span className="nav-logo-icon">🎬</span>
+            <span className="nav-logo-text">VideoForge<span className="nav-logo-ai">AI</span></span>
+          </div>
+          <div className="nav-links">
+            <button className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+              📊 Dashboard
+            </button>
+            <button className={`nav-link ${activeTab === 'create' ? 'active' : ''}`} onClick={() => setActiveTab('create')}>
+              🎥 Create Video
+            </button>
+            <button className={`nav-link ${activeTab === 'test' ? 'active' : ''}`} onClick={() => setActiveTab('test')}>
+              🧪 Test Lab
+            </button>
+            <button className={`nav-link ${activeTab === 'templates' ? 'active' : ''}`} onClick={() => setActiveTab('templates')}>
+              📁 Templates
+            </button>
+            <button className={`nav-link ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}>
+              📈 Analytics
+            </button>
+            <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+              ⚙️ Settings
             </button>
           </div>
+          <div className="nav-user">
+            <span className="nav-avatar">U</span>
+          </div>
+        </div>
+      </nav>
 
-          {/* Progress */}
-          {jobStatus && (
+      <main className="app-main">
+        {error && (
+          <div className="alert alert-error">
+            <span>⚠️ {error}</span>
+            <button onClick={() => setError('')} className="alert-close">✕</button>
+          </div>
+        )}
+
+        {/* ─── Dashboard Page ─── */}
+        {activeTab === 'dashboard' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>Dashboard</h1>
+              <p className="page-subtitle">Overview of your video generation activity</p>
+            </div>
+            <div className="stats-grid">
+              <div className="stat-card">
+                <span className="stat-icon">🎬</span>
+                <div className="stat-info">
+                  <span className="stat-value">0</span>
+                  <span className="stat-label">Videos Created</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-icon">🖼️</span>
+                <div className="stat-info">
+                  <span className="stat-value">0</span>
+                  <span className="stat-label">Images Generated</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-icon">🔊</span>
+                <div className="stat-info">
+                  <span className="stat-value">0</span>
+                  <span className="stat-label">Audio Clips</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-icon">⏱️</span>
+                <div className="stat-info">
+                  <span className="stat-value">0 min</span>
+                  <span className="stat-label">Total Duration</span>
+                </div>
+              </div>
+            </div>
             <div className="card">
               <div className="card-header">
-                <h2>📊 Progress</h2>
-                <span className={`status-badge ${jobStatus}`}>
-                  {jobStatus === 'queued' && '⏳'}
-                  {jobStatus === 'processing' && '⚙️'}
-                  {jobStatus === 'completed' && '✅'}
-                  {jobStatus === 'failed' && '❌'}
-                  {' '}{jobStatus.charAt(0).toUpperCase() + jobStatus.slice(1)}
-                </span>
+                <h2>🕐 Recent Activity</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Your recent video generation history will appear here. Start by creating your first video from the <strong>Create Video</strong> page.</p>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <h2>🚀 Quick Start</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Welcome to VideoForge AI — a multi-provider AI video generation platform. Use the navigation above to create videos, test individual components, browse templates, or view analytics.</p>
+                <p>To get started, navigate to <strong>Create Video</strong> to compose scenes with voiceover text and image prompts, then generate a fully assembled video with optional Ken Burns effects.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Create Video Page ─── */}
+        {activeTab === 'create' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>Create Video</h1>
+              <p className="page-subtitle">Configure settings and generate AI-powered videos</p>
+            </div>
+
+            {/* Full Model Settings Card */}
+            <div className="card">
+              <div className="card-header">
+                <h2>⚙️ Model Settings</h2>
+                <span className="card-badge">Configuration</span>
               </div>
 
-              <div className="progress-bar-wrapper">
-                <div
-                  className={`progress-bar-fill ${jobStatus}`}
-                  style={{ width: `${jobProgress}%` }}
-                ></div>
+              <div className="settings-section">
+                <h3 className="section-title">🔊 Speech Settings</h3>
+                {renderSpeechSettings()}
               </div>
 
-              <div className="progress-info">
-                <span className="progress-message">{jobMessage}</span>
-                <span className={`progress-percent ${jobStatus}`}>{jobProgress}%</span>
+              <div className="settings-section">
+                <h3 className="section-title">🖼️ Image Settings</h3>
+                {renderImageSettings()}
               </div>
 
-              {jobStatus === 'completed' && (
-                <div className="download-area">
-                  <span style={{ fontSize: '2rem' }}>🎉</span>
-                  <div>
-                    <strong>Video Ready!</strong>
-                    <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>Your video has been generated successfully.</p>
+              <div className="settings-section">
+                <h3 className="section-title">🎞️ Video Settings</h3>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Output Resolution</label>
+                    <select value={resolution} onChange={e => setResolution(e.target.value)}>
+                      {models?.resolutions?.map(r => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                      ))}
+                    </select>
                   </div>
-                  <button className="btn btn-success" onClick={downloadVideo}>
-                    ⬇️ Download Video
+                  <div className="form-group">
+                    <label className="toggle-label">
+                      Ken Burns Effect
+                      <span className="help-tooltip" title="Adds a very subtle slow zoom animation to images, making the video more dynamic. The effect is gentle to avoid cropping text or important content.">ℹ️</span>
+                    </label>
+                    <label className="switch-container">
+                      <input type="checkbox" checked={enableKenBurns} onChange={e => setEnableKenBurns(e.target.checked)} />
+                      <span className="switch-slider"></span>
+                      <span className="switch-label">{enableKenBurns ? 'Enabled — Gentle zoom & pan' : 'Disabled — Static images'}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Scenes Card */}
+            <div className="card">
+              <div className="card-header">
+                <h2>📝 Scenes</h2>
+                <div className="btn-group">
+                  <button className="btn btn-secondary btn-sm" onClick={loadDefaultScenes}>
+                    Load Default Scenes
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_SCENES_EXAMPLE)}>
+                    Load Example Template
                   </button>
                 </div>
-              )}
+              </div>
 
-              {jobStatus === 'failed' && (
-                <div className="retry-area">
-                  <span style={{ fontSize: '1.5rem' }}>🔄</span>
-                  <div>
-                    <strong>Generation Failed</strong>
-                    <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>
-                      Already generated assets will be reused. Click retry to resume from where it stopped.
-                    </p>
-                  </div>
-                  <button className="btn btn-primary" onClick={retryGeneration} disabled={isGenerating}>
-                    {isGenerating ? <><span className="spinner"></span> Retrying...</> : <>🔄 Retry</>}
-                  </button>
+              <div className="form-group">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                  <label style={{ margin: 0 }}>Paste your scenes JSON array below</label>
+                  {scenesText && (
+                    <span className={`scene-count ${sceneInfo.valid ? 'valid' : 'invalid'}`}>
+                      {sceneInfo.valid ? `✓ ${sceneInfo.count} scenes` : `✗ ${sceneInfo.error}`}
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
+                <textarea
+                  className="scene-editor"
+                  placeholder={DEFAULT_SCENES_EXAMPLE}
+                  value={scenesText}
+                  onChange={e => setScenesText(e.target.value)}
+                />
+                <p className="help-text">
+                  Each scene needs a &quot;voiceover&quot; (text for speech) and a &quot;prompt&quot; (text for image generation).
+                </p>
+              </div>
 
-      {/* Test Tab */}
-      {activeTab === 'test' && (
-        <>
-          <div className="card">
-            <div className="card-header">
-              <h2>🔊 Test Audio Generation</h2>
+              <button
+                className="btn btn-primary btn-block btn-glow"
+                disabled={!sceneInfo.valid || isGenerating}
+                onClick={startGeneration}
+              >
+                {isGenerating ? (
+                  <><span className="spinner"></span> Generating...</>
+                ) : (
+                  <>🚀 Generate Video</>
+                )}
+              </button>
             </div>
-            <p style={{ color: '#8b8fa3', fontSize: '0.85rem', marginBottom: '1rem' }}>
-              Test your speech model and voice settings with a sample text.
-            </p>
-            <div className="form-group">
-              <label>Text to speak</label>
-              <textarea
-                value={testAudioText}
-                onChange={e => setTestAudioText(e.target.value)}
-                rows={3}
-                style={{ minHeight: '80px' }}
-              />
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={testAudio}
-              disabled={testingAudio || !testAudioText.trim()}
-            >
-              {testingAudio ? <><span className="spinner"></span> Generating...</> : <>🔊 Test Audio</>}
-            </button>
 
-            {testAudioUrl && (
-              <div className="test-result">
-                <strong>✅ Audio Generated</strong>
-                <audio controls src={testAudioUrl} />
+            {/* Progress */}
+            {jobStatus && (
+              <div className="card">
+                <div className="card-header">
+                  <h2>📊 Progress</h2>
+                  <span className={`status-badge ${jobStatus}`}>
+                    {jobStatus === 'queued' && '⏳'}
+                    {jobStatus === 'processing' && '⚙️'}
+                    {jobStatus === 'completed' && '✅'}
+                    {jobStatus === 'failed' && '❌'}
+                    {' '}{jobStatus.charAt(0).toUpperCase() + jobStatus.slice(1)}
+                  </span>
+                </div>
+
+                <div className="progress-bar-wrapper">
+                  <div className={`progress-bar-fill ${jobStatus}`} style={{ width: `${jobProgress}%` }}></div>
+                </div>
+
+                <div className="progress-info">
+                  <span className="progress-message">{jobMessage}</span>
+                  <span className={`progress-percent ${jobStatus}`}>{jobProgress}%</span>
+                </div>
+
+                {jobStatus === 'completed' && (
+                  <div className="download-area">
+                    <span style={{ fontSize: '2rem' }}>🎉</span>
+                    <div>
+                      <strong>Video Ready!</strong>
+                      <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>Your video has been generated successfully.</p>
+                    </div>
+                    <button className="btn btn-success" onClick={downloadVideo}>
+                      ⬇️ Download Video
+                    </button>
+                  </div>
+                )}
+
+                {jobStatus === 'failed' && (
+                  <div className="retry-area">
+                    <span style={{ fontSize: '1.5rem' }}>🔄</span>
+                    <div>
+                      <strong>Generation Failed</strong>
+                      <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>
+                        Already generated assets will be reused. Click retry to resume from where it stopped.
+                      </p>
+                    </div>
+                    <button className="btn btn-primary" onClick={retryGeneration} disabled={isGenerating}>
+                      {isGenerating ? <><span className="spinner"></span> Retrying...</> : <>🔄 Retry</>}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
+        )}
 
-          <div className="card">
-            <div className="card-header">
-              <h2>🖼️ Test Image Generation</h2>
+        {/* ─── Test Lab Page ─── */}
+        {activeTab === 'test' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>Test Lab</h1>
+              <p className="page-subtitle">Test individual audio and image generation before creating a full video</p>
             </div>
-            <p style={{ color: '#8b8fa3', fontSize: '0.85rem', marginBottom: '1rem' }}>
-              Test your image model settings with a sample prompt.
-            </p>
-            <div className="form-group">
-              <label>Image prompt</label>
-              <textarea
-                value={testImagePrompt}
-                onChange={e => setTestImagePrompt(e.target.value)}
-                rows={3}
-                style={{ minHeight: '80px' }}
-              />
-            </div>
-            <button
-              className="btn btn-primary"
-              onClick={testImage}
-              disabled={testingImage || !testImagePrompt.trim()}
-            >
-              {testingImage ? <><span className="spinner"></span> Generating...</> : <>🖼️ Test Image</>}
-            </button>
 
-            {testImageUrl && (
-              <div className="test-result">
-                <strong>✅ Image Generated</strong>
-                <img src={testImageUrl} alt="Generated test" />
+            {/* Test Audio Card — only audio-related settings */}
+            <div className="card">
+              <div className="card-header">
+                <h2>🔊 Test Audio Generation</h2>
               </div>
-            )}
+              <p style={{ color: '#8b8fa3', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                Test your speech settings with a sample text.
+              </p>
+
+              <div className="settings-section">
+                <h3 className="section-title">Speech Settings</h3>
+                {renderSpeechSettings()}
+              </div>
+
+              <div className="form-group">
+                <label>Text to speak</label>
+                <textarea
+                  value={testAudioText}
+                  onChange={e => setTestAudioText(e.target.value)}
+                  rows={3}
+                  style={{ minHeight: '80px' }}
+                />
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={testAudio}
+                disabled={testingAudio || !testAudioText.trim()}
+              >
+                {testingAudio ? <><span className="spinner"></span> Generating...</> : <>🔊 Test Audio</>}
+              </button>
+
+              {testAudioUrl && (
+                <div className="test-result">
+                  <strong>✅ Audio Generated</strong>
+                  <audio controls src={testAudioUrl} />
+                </div>
+              )}
+            </div>
+
+            {/* Test Image Card — only image-related settings */}
+            <div className="card">
+              <div className="card-header">
+                <h2>🖼️ Test Image Generation</h2>
+              </div>
+              <p style={{ color: '#8b8fa3', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                Test your image settings with a sample prompt.
+              </p>
+
+              <div className="settings-section">
+                <h3 className="section-title">Image Settings</h3>
+                {renderImageSettings()}
+              </div>
+
+              <div className="form-group">
+                <label>Image prompt</label>
+                <textarea
+                  value={testImagePrompt}
+                  onChange={e => setTestImagePrompt(e.target.value)}
+                  rows={3}
+                  style={{ minHeight: '80px' }}
+                />
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={testImage}
+                disabled={testingImage || !testImagePrompt.trim()}
+              >
+                {testingImage ? <><span className="spinner"></span> Generating...</> : <>🖼️ Test Image</>}
+              </button>
+
+              {testImageUrl && (
+                <div className="test-result">
+                  <strong>✅ Image Generated</strong>
+                  <img src={testImageUrl} alt="Generated test" />
+                </div>
+              )}
+            </div>
           </div>
-        </>
-      )}
+        )}
+
+        {/* ─── Templates Page (Placeholder) ─── */}
+        {activeTab === 'templates' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>Templates</h1>
+              <p className="page-subtitle">Browse and use pre-built video templates to get started faster</p>
+            </div>
+            <div className="placeholder-grid">
+              {[
+                { icon: '🎓', title: 'Educational Explainer', desc: 'Create engaging educational videos with clear narration and illustrative images. Perfect for tutorials, courses, and how-to guides.' },
+                { icon: '📢', title: 'Product Showcase', desc: 'Highlight product features with stunning visuals and professional voiceovers. Ideal for marketing and promotional content.' },
+                { icon: '📖', title: 'Story Narration', desc: 'Bring stories to life with vivid imagery and expressive narration. Great for children\'s stories, podcasts, and audiobooks.' },
+                { icon: '📰', title: 'News Recap', desc: 'Summarize news and current events with dynamic visuals and concise commentary. Perfect for social media and newsletters.' },
+                { icon: '🏢', title: 'Corporate Presentation', desc: 'Build polished corporate presentations with data-driven visuals and professional tone. Ideal for stakeholder updates.' },
+                { icon: '🌍', title: 'Travel Documentary', desc: 'Craft immersive travel documentaries with scenic imagery and engaging narration. Perfect for travel blogs and vlogs.' },
+              ].map((tmpl, i) => (
+                <div className="card template-card" key={i}>
+                  <div className="template-icon">{tmpl.icon}</div>
+                  <h3>{tmpl.title}</h3>
+                  <p>{tmpl.desc}</p>
+                  <span className="badge" style={{ marginTop: '0.75rem' }}>Coming Soon</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ─── Analytics Page (Placeholder) ─── */}
+        {activeTab === 'analytics' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>Analytics</h1>
+              <p className="page-subtitle">Track your usage, generation history, and performance metrics</p>
+            </div>
+            <div className="stats-grid">
+              <div className="stat-card">
+                <span className="stat-icon">📊</span>
+                <div className="stat-info">
+                  <span className="stat-value">—</span>
+                  <span className="stat-label">Generations This Month</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-icon">⏱️</span>
+                <div className="stat-info">
+                  <span className="stat-value">—</span>
+                  <span className="stat-label">Avg. Generation Time</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-icon">✅</span>
+                <div className="stat-info">
+                  <span className="stat-value">—</span>
+                  <span className="stat-label">Success Rate</span>
+                </div>
+              </div>
+              <div className="stat-card">
+                <span className="stat-icon">💾</span>
+                <div className="stat-info">
+                  <span className="stat-value">—</span>
+                  <span className="stat-label">Storage Used</span>
+                </div>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <h2>📈 Usage Over Time</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Detailed usage charts and generation history will be available here. Track trends in your video creation workflow, monitor API costs, and identify the most efficient provider and model combinations for your content.</p>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <h2>🏆 Provider Comparison</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Compare generation quality, speed, and cost across different AI providers. Analyze which combinations of speech and image models produce the best results for your specific use cases.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Settings Page (Placeholder) ─── */}
+        {activeTab === 'settings' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>Settings</h1>
+              <p className="page-subtitle">Manage your account, API keys, and application preferences</p>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <h2>🔑 API Keys</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Configure your API keys for Google Gemini, OpenAI, and Together AI. All keys are stored securely and encrypted at rest. You can rotate keys at any time without affecting your existing generated content.</p>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <h2>🎨 Preferences</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Customize your default generation settings, output formats, and notification preferences. Set default providers, models, and quality settings that will be applied to every new project automatically.</p>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <h2>👤 Account</h2>
+              </div>
+              <div className="placeholder-content">
+                <p>Manage your account details, subscription plan, and billing information. View your current plan limits and upgrade options for higher throughput and additional features.</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
 
       {/* Footer */}
       <footer className="app-footer">
