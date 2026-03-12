@@ -103,13 +103,13 @@ def generate_image_openai(prompt: str, output_path: str, model: str = "gpt-image
         size="1536x1024",
     )
 
-    image_url = result.data[0].url
-    if result.data[0].b64_json:
-        image_data = base64.b64decode(result.data[0].b64_json)
-        img = Image.open(BytesIO(image_data))
+    image_result = result.data[0]
+    if image_result.b64_json:
+        raw_data = base64.b64decode(image_result.b64_json)
+        img = Image.open(BytesIO(raw_data))
     else:
         import urllib.request
-        with urllib.request.urlopen(image_url) as resp:
+        with urllib.request.urlopen(image_result.url) as resp:
             img = Image.open(BytesIO(resp.read()))
 
     img.save(output_path)
@@ -136,12 +136,13 @@ def generate_image_togetherai(prompt: str, output_path: str,
         height=height,
     )
 
-    if response.data[0].b64_json:
-        image_data = base64.b64decode(response.data[0].b64_json)
-        img = Image.open(BytesIO(image_data))
+    image_result = response.data[0]
+    if image_result.b64_json:
+        raw_data = base64.b64decode(image_result.b64_json)
+        img = Image.open(BytesIO(raw_data))
     else:
         import urllib.request
-        with urllib.request.urlopen(response.data[0].url) as resp:
+        with urllib.request.urlopen(image_result.url) as resp:
             img = Image.open(BytesIO(resp.read()))
 
     img.save(output_path)
