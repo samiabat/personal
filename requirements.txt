@@ -7,3 +7,6 @@ uvicorn[standard]
 python-multipart
 openai
 sse-starlette
+together
+requests
+numpy

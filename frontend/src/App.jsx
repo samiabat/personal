@@ -28,12 +28,16 @@ function App() {
   const [speechVoice, setSpeechVoice] = useState('Charon')
   const [customVoice, setCustomVoice] = useState('')
   const [useCustomVoice, setUseCustomVoice] = useState(false)
+  const [imageProvider, setImageProvider] = useState('gemini')
   const [imageModel, setImageModel] = useState('gemini-3.1-flash-image-preview')
   const [customImageModel, setCustomImageModel] = useState('')
   const [useCustomImageModel, setUseCustomImageModel] = useState(false)
   const [resolution, setResolution] = useState('1080p')
   const [aspectRatio, setAspectRatio] = useState('16:9')
   const [imageSize, setImageSize] = useState('512')
+  const [openaiImageSize, setOpenaiImageSize] = useState('1024x1024')
+  const [togetheraiSize, setTogetheraiSize] = useState('1024x576')
+  const [enableKenBurns, setEnableKenBurns] = useState(false)
 
   // Job tracking
   const [jobId, setJobId] = useState(null)
@@ -75,6 +79,16 @@ function App() {
     setUseCustomVoice(false)
   }, [speechProvider, models])
 
+  // Update image model when image provider changes
+  useEffect(() => {
+    if (!models) return
+    const providerModels = models.image_models?.[imageProvider]
+    if (providerModels && providerModels.length > 0) {
+      setImageModel(providerModels[0].value)
+    }
+    setUseCustomImageModel(false)
+  }, [imageProvider, models])
+
   const loadDefaultScenes = useCallback(() => {
     fetch(`${API_BASE}/default-scenes`)
       .then(res => res.json())
@@ -99,6 +113,42 @@ function App() {
   const getActiveVoice = () => useCustomVoice && customVoice ? customVoice : speechVoice
   const getActiveImageModel = () => useCustomImageModel && customImageModel ? customImageModel : imageModel
 
+  const getTogetheraiDimensions = () => {
+    const [w, h] = togetheraiSize.split('x').map(Number)
+    return { width: w, height: h }
+  }
+
+  const connectSSE = (id) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+
+    const es = new EventSource(`${API_BASE}/progress/${id}`)
+    eventSourceRef.current = es
+
+    es.addEventListener('progress', (event) => {
+      const data = JSON.parse(event.data)
+      setJobStatus(data.status)
+      setJobProgress(data.progress)
+      setJobMessage(data.message)
+
+      if (data.status === 'completed' || data.status === 'failed') {
+        es.close()
+        eventSourceRef.current = null
+        if (data.status === 'failed') {
+          setError(data.message)
+        }
+        setIsGenerating(false)
+      }
+    })
+
+    es.onerror = () => {
+      es.close()
+      eventSourceRef.current = null
+      pollStatus(id)
+    }
+  }
+
   const startGeneration = async () => {
     const { valid, error: parseError } = parseScenes()
     if (!valid) {
@@ -112,6 +162,8 @@ function App() {
     setJobProgress(0)
     setJobMessage('Starting...')
 
+    const togDims = getTogetheraiDimensions()
+
     try {
       const res = await fetch(`${API_BASE}/generate-video`, {
         method: 'POST',
@@ -121,10 +173,15 @@ function App() {
           speech_provider: speechProvider,
           speech_model: getActiveSpeechModel(),
           speech_voice: getActiveVoice(),
+          image_provider: imageProvider,
           image_model: getActiveImageModel(),
           aspect_ratio: aspectRatio,
           image_size: imageSize,
+          openai_image_size: openaiImageSize,
+          togetherai_width: togDims.width,
+          togetherai_height: togDims.height,
           resolution,
+          enable_ken_burns: enableKenBurns,
         }),
       })
 
@@ -135,37 +192,32 @@ function App() {
 
       const { job_id } = await res.json()
       setJobId(job_id)
+      connectSSE(job_id)
+    } catch (err) {
+      setError(err.message)
+      setIsGenerating(false)
+    }
+  }
 
-      // Connect to SSE for progress
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
-      }
+  const retryGeneration = async () => {
+    if (!jobId) return
+    setError('')
+    setIsGenerating(true)
+    setJobStatus('queued')
+    setJobProgress(0)
+    setJobMessage('Retrying...')
 
-      const es = new EventSource(`${API_BASE}/progress/${job_id}`)
-      eventSourceRef.current = es
-
-      es.addEventListener('progress', (event) => {
-        const data = JSON.parse(event.data)
-        setJobStatus(data.status)
-        setJobProgress(data.progress)
-        setJobMessage(data.message)
-
-        if (data.status === 'completed' || data.status === 'failed') {
-          es.close()
-          eventSourceRef.current = null
-          if (data.status === 'failed') {
-            setError(data.message)
-          }
-          setIsGenerating(false)
-        }
+    try {
+      const res = await fetch(`${API_BASE}/retry/${jobId}`, {
+        method: 'POST',
       })
 
-      es.onerror = () => {
-        es.close()
-        eventSourceRef.current = null
-        // Poll status as fallback
-        pollStatus(job_id)
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to retry')
       }
+
+      connectSSE(jobId)
     } catch (err) {
       setError(err.message)
       setIsGenerating(false)
@@ -229,15 +281,21 @@ function App() {
     setTestImageUrl(null)
     setError('')
 
+    const togDims = getTogetheraiDimensions()
+
     try {
       const res = await fetch(`${API_BASE}/test-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: testImagePrompt,
+          image_provider: imageProvider,
           image_model: getActiveImageModel(),
           aspect_ratio: aspectRatio,
           image_size: imageSize,
+          openai_image_size: openaiImageSize,
+          togetherai_width: togDims.width,
+          togetherai_height: togDims.height,
         }),
       })
 
@@ -266,15 +324,24 @@ function App() {
 
   return (
     <div className="app">
+      {/* Hero Header */}
       <header className="app-header">
-        <h1>🎬 AI Video Generator</h1>
-        <p>Generate AI-powered videos from scenes with customizable speech and image models</p>
+        <div className="logo">
+          <span className="logo-icon">🎬</span>
+          <span className="logo-text">VideoForge<span className="logo-ai">AI</span></span>
+        </div>
+        <p className="app-subtitle">Transform your ideas into stunning AI-generated videos in minutes</p>
+        <div className="header-badges">
+          <span className="badge">Multi-Provider</span>
+          <span className="badge">Ken Burns Effect</span>
+          <span className="badge">Auto-Resume</span>
+        </div>
       </header>
 
       {error && (
         <div className="alert alert-error">
-          ⚠️ {error}
-          <button onClick={() => setError('')} style={{ float: 'right', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>✕</button>
+          <span>⚠️ {error}</span>
+          <button onClick={() => setError('')} className="alert-close">✕</button>
         </div>
       )}
 
@@ -289,135 +356,203 @@ function App() {
 
       {/* Settings Card - Shared between tabs */}
       <div className="card">
-        <h2>⚙️ Model Settings</h2>
+        <div className="card-header">
+          <h2>⚙️ Model Settings</h2>
+          <span className="card-badge">Configuration</span>
+        </div>
 
-        {/* Speech Provider */}
-        <div className="form-row">
-          <div className="form-group">
-            <label>Speech Provider</label>
-            <select value={speechProvider} onChange={e => setSpeechProvider(e.target.value)}>
-              {models?.speech_providers.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label>
-              Speech Model
-              <label style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#6b7080' }}>
-                <input
-                  type="checkbox"
-                  checked={useCustomSpeechModel}
-                  onChange={e => setUseCustomSpeechModel(e.target.checked)}
-                  style={{ marginRight: '0.25rem' }}
-                />
-                Custom
-              </label>
-            </label>
-            {useCustomSpeechModel ? (
-              <input
-                type="text"
-                placeholder="Enter custom model name..."
-                value={customSpeechModel}
-                onChange={e => setCustomSpeechModel(e.target.value)}
-              />
-            ) : (
-              <select value={speechModel} onChange={e => setSpeechModel(e.target.value)}>
-                {models?.speech_models[speechProvider]?.map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
+        {/* Speech Settings Section */}
+        <div className="settings-section">
+          <h3 className="section-title">🔊 Speech Settings</h3>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Speech Provider</label>
+              <select value={speechProvider} onChange={e => setSpeechProvider(e.target.value)}>
+                {models?.speech_providers.map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
               </select>
-            )}
+            </div>
+
+            <div className="form-group">
+              <label>
+                Speech Model
+                <label className="custom-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useCustomSpeechModel}
+                    onChange={e => setUseCustomSpeechModel(e.target.checked)}
+                  />
+                  Custom
+                </label>
+              </label>
+              {useCustomSpeechModel ? (
+                <input
+                  type="text"
+                  placeholder="Enter custom model name..."
+                  value={customSpeechModel}
+                  onChange={e => setCustomSpeechModel(e.target.value)}
+                />
+              ) : (
+                <select value={speechModel} onChange={e => setSpeechModel(e.target.value)}>
+                  {models?.speech_models[speechProvider]?.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label>
+                Voice
+                <label className="custom-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useCustomVoice}
+                    onChange={e => setUseCustomVoice(e.target.checked)}
+                  />
+                  Custom
+                </label>
+              </label>
+              {useCustomVoice ? (
+                <input
+                  type="text"
+                  placeholder="Enter custom voice name..."
+                  value={customVoice}
+                  onChange={e => setCustomVoice(e.target.value)}
+                />
+              ) : (
+                <select value={speechVoice} onChange={e => setSpeechVoice(e.target.value)}>
+                  {models?.speech_voices[speechProvider]?.map(v => (
+                    <option key={v.value} value={v.value}>{v.label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>
-              Voice
-              <label style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#6b7080' }}>
-                <input
-                  type="checkbox"
-                  checked={useCustomVoice}
-                  onChange={e => setUseCustomVoice(e.target.checked)}
-                  style={{ marginRight: '0.25rem' }}
-                />
-                Custom
-              </label>
-            </label>
-            {useCustomVoice ? (
-              <input
-                type="text"
-                placeholder="Enter custom voice name..."
-                value={customVoice}
-                onChange={e => setCustomVoice(e.target.value)}
-              />
-            ) : (
-              <select value={speechVoice} onChange={e => setSpeechVoice(e.target.value)}>
-                {models?.speech_voices[speechProvider]?.map(v => (
-                  <option key={v.value} value={v.value}>{v.label}</option>
+        {/* Image Settings Section */}
+        <div className="settings-section">
+          <h3 className="section-title">🖼️ Image Settings</h3>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Image Provider</label>
+              <select value={imageProvider} onChange={e => setImageProvider(e.target.value)}>
+                {models?.image_providers?.map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
               </select>
-            )}
+            </div>
+
+            <div className="form-group">
+              <label>
+                Image Model
+                <label className="custom-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useCustomImageModel}
+                    onChange={e => setUseCustomImageModel(e.target.checked)}
+                  />
+                  Custom
+                </label>
+              </label>
+              {useCustomImageModel ? (
+                <input
+                  type="text"
+                  placeholder="Enter custom image model name..."
+                  value={customImageModel}
+                  onChange={e => setCustomImageModel(e.target.value)}
+                />
+              ) : (
+                <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
+                  {models?.image_models?.[imageProvider]?.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
 
-          <div className="form-group">
-            <label>
-              Image Model
-              <label style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#6b7080' }}>
-                <input
-                  type="checkbox"
-                  checked={useCustomImageModel}
-                  onChange={e => setUseCustomImageModel(e.target.checked)}
-                  style={{ marginRight: '0.25rem' }}
-                />
-                Custom
-              </label>
-            </label>
-            {useCustomImageModel ? (
-              <input
-                type="text"
-                placeholder="Enter custom image model name..."
-                value={customImageModel}
-                onChange={e => setCustomImageModel(e.target.value)}
-              />
-            ) : (
-              <select value={imageModel} onChange={e => setImageModel(e.target.value)}>
-                {models?.image_models?.map(m => (
-                  <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-              </select>
-            )}
-          </div>
+          {/* Provider-specific image settings */}
+          {imageProvider === 'gemini' && (
+            <div className="form-row">
+              <div className="form-group">
+                <label>Aspect Ratio</label>
+                <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value)}>
+                  {models?.aspect_ratios?.map(a => (
+                    <option key={a.value} value={a.value}>{a.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Image Size</label>
+                <select value={imageSize} onChange={e => setImageSize(e.target.value)}>
+                  <option value="256">256px</option>
+                  <option value="512">512px</option>
+                  <option value="1024">1024px</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {imageProvider === 'openai' && (
+            <div className="form-row">
+              <div className="form-group">
+                <label>Image Size</label>
+                <select value={openaiImageSize} onChange={e => setOpenaiImageSize(e.target.value)}>
+                  {models?.openai_image_sizes?.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {imageProvider === 'togetherai' && (
+            <div className="form-row">
+              <div className="form-group">
+                <label>Image Dimensions</label>
+                <select value={togetheraiSize} onChange={e => setTogetheraiSize(e.target.value)}>
+                  {models?.togetherai_sizes?.map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="form-row-3">
-          <div className="form-group">
-            <label>Resolution</label>
-            <select value={resolution} onChange={e => setResolution(e.target.value)}>
-              {models?.resolutions?.map(r => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
-          </div>
+        {/* Video Settings Section */}
+        <div className="settings-section">
+          <h3 className="section-title">🎞️ Video Settings</h3>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Output Resolution</label>
+              <select value={resolution} onChange={e => setResolution(e.target.value)}>
+                {models?.resolutions?.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
 
-          <div className="form-group">
-            <label>Aspect Ratio</label>
-            <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value)}>
-              {models?.aspect_ratios?.map(a => (
-                <option key={a.value} value={a.value}>{a.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label>Image Size</label>
-            <select value={imageSize} onChange={e => setImageSize(e.target.value)}>
-              <option value="256">256px</option>
-              <option value="512">512px</option>
-              <option value="1024">1024px</option>
-            </select>
+            <div className="form-group">
+              <label className="toggle-label">
+                Ken Burns Effect
+                <span className="help-tooltip" title="Adds a subtle slow zoom and pan animation to images, making the video more dynamic and engaging instead of static images.">ℹ️</span>
+              </label>
+              <label className="switch-container">
+                <input
+                  type="checkbox"
+                  checked={enableKenBurns}
+                  onChange={e => setEnableKenBurns(e.target.checked)}
+                />
+                <span className="switch-slider"></span>
+                <span className="switch-label">{enableKenBurns ? 'Enabled — Dynamic zoom & pan' : 'Disabled — Static images'}</span>
+              </label>
+            </div>
           </div>
         </div>
       </div>
@@ -426,7 +561,7 @@ function App() {
       {activeTab === 'generate' && (
         <>
           <div className="card">
-            <div className="scene-info">
+            <div className="card-header">
               <h2>📝 Scenes</h2>
               <div className="btn-group">
                 <button className="btn btn-secondary btn-sm" onClick={loadDefaultScenes}>
@@ -459,7 +594,7 @@ function App() {
             </div>
 
             <button
-              className="btn btn-primary btn-block"
+              className="btn btn-primary btn-block btn-glow"
               disabled={!sceneInfo.valid || isGenerating}
               onClick={startGeneration}
             >
@@ -474,7 +609,7 @@ function App() {
           {/* Progress */}
           {jobStatus && (
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div className="card-header">
                 <h2>📊 Progress</h2>
                 <span className={`status-badge ${jobStatus}`}>
                   {jobStatus === 'queued' && '⏳'}
@@ -509,6 +644,21 @@ function App() {
                   </button>
                 </div>
               )}
+
+              {jobStatus === 'failed' && (
+                <div className="retry-area">
+                  <span style={{ fontSize: '1.5rem' }}>🔄</span>
+                  <div>
+                    <strong>Generation Failed</strong>
+                    <p style={{ color: '#8b8fa3', fontSize: '0.85rem' }}>
+                      Already generated assets will be reused. Click retry to resume from where it stopped.
+                    </p>
+                  </div>
+                  <button className="btn btn-primary" onClick={retryGeneration} disabled={isGenerating}>
+                    {isGenerating ? <><span className="spinner"></span> Retrying...</> : <>🔄 Retry</>}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -518,7 +668,9 @@ function App() {
       {activeTab === 'test' && (
         <>
           <div className="card">
-            <h2>🔊 Test Audio Generation</h2>
+            <div className="card-header">
+              <h2>🔊 Test Audio Generation</h2>
+            </div>
             <p style={{ color: '#8b8fa3', fontSize: '0.85rem', marginBottom: '1rem' }}>
               Test your speech model and voice settings with a sample text.
             </p>
@@ -548,7 +700,9 @@ function App() {
           </div>
 
           <div className="card">
-            <h2>🖼️ Test Image Generation</h2>
+            <div className="card-header">
+              <h2>🖼️ Test Image Generation</h2>
+            </div>
             <p style={{ color: '#8b8fa3', fontSize: '0.85rem', marginBottom: '1rem' }}>
               Test your image model settings with a sample prompt.
             </p>
@@ -578,6 +732,11 @@ function App() {
           </div>
         </>
       )}
+
+      {/* Footer */}
+      <footer className="app-footer">
+        <p>VideoForge AI — Powered by Gemini, OpenAI & Together AI</p>
+      </footer>
     </div>
   )
 }
