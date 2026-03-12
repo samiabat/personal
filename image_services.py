@@ -40,6 +40,7 @@ def generate_image_openai(prompt: str, output_path: str, model: str = "gpt-image
         prompt=prompt,
         size="1536x1024",
         n=1,
+        response_format="b64_json",
     )
 
     image_data = base64.b64decode(result.data[0].b64_json)
@@ -80,6 +81,7 @@ def generate_image_together(
         width=dims["width"],
         height=dims["height"],
         n=1,
+        response_format="b64_json",
     )
 
     img_data = base64.b64decode(response.data[0].b64_json)

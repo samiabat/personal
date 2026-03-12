@@ -18,7 +18,7 @@ def _apply_ken_burns(image_clip, zoom_ratio=0.04):
     end_zoom = base_zoom + zoom_ratio
 
     # Random pan offsets (dx, dy) in pixels – will linearly interpolate
-    np.random.seed(hash(str(duration)) % (2**31))
+    np.random.seed(hash((id(image_clip), duration)) % (2**31))
     max_pan_x = int(w * zoom_ratio * 0.5)
     max_pan_y = int(h * zoom_ratio * 0.5)
     start_dx = np.random.randint(-max_pan_x, max_pan_x + 1)
