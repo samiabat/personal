@@ -49,12 +49,17 @@ class VideoRequest(BaseModel):
     enable_ken_burns: bool = False
     enable_zoom: bool = False
     enable_shake: bool = False
+    gemini_api_key: Optional[str] = ""
+    openai_api_key: Optional[str] = ""
+    together_api_key: Optional[str] = ""
 
 class TestAudioRequest(BaseModel):
     text: str
     speech_provider: str = "google"
     speech_model: str = "gemini-2.5-pro-preview-tts"
     speech_voice: str = "Charon"
+    gemini_api_key: Optional[str] = ""
+    openai_api_key: Optional[str] = ""
 
 class TestImageRequest(BaseModel):
     prompt: str
@@ -65,6 +70,9 @@ class TestImageRequest(BaseModel):
     openai_image_size: str = "1024x1024"
     togetherai_width: int = 1024
     togetherai_height: int = 576
+    gemini_api_key: Optional[str] = ""
+    openai_api_key: Optional[str] = ""
+    together_api_key: Optional[str] = ""
 
 
 def _generate_image_for_provider(provider: str, prompt: str, image_path: str, **kwargs):
@@ -75,6 +83,7 @@ def _generate_image_for_provider(provider: str, prompt: str, image_path: str, **
             prompt, image_path,
             model=kwargs.get("image_model", "gpt-image-1"),
             size=kwargs.get("openai_image_size", "1024x1024"),
+            api_key=kwargs.get("openai_api_key", ""),
         )
     elif provider == "togetherai":
         from image_services import generate_image_togetherai
@@ -83,6 +92,7 @@ def _generate_image_for_provider(provider: str, prompt: str, image_path: str, **
             model=kwargs.get("image_model", "black-forest-labs/FLUX.1-schnell"),
             width=kwargs.get("togetherai_width", 1024),
             height=kwargs.get("togetherai_height", 576),
+            api_key=kwargs.get("together_api_key", ""),
         )
     else:  # gemini
         from gemini_services import generate_image
@@ -91,6 +101,7 @@ def _generate_image_for_provider(provider: str, prompt: str, image_path: str, **
             model=kwargs.get("image_model", "gemini-3.1-flash-image-preview"),
             aspect_ratio=kwargs.get("aspect_ratio", "16:9"),
             image_size=kwargs.get("image_size", "512"),
+            api_key=kwargs.get("gemini_api_key", ""),
         )
 
 
@@ -119,10 +130,10 @@ def run_asset_generation(job_id: str, request: VideoRequest):
                 job["message"] = f"Scene {index + 1}/{total_scenes}: Generating audio..."
                 if request.speech_provider == "openai":
                     from openai_services import generate_audio_openai
-                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice)
+                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.openai_api_key or "")
                 else:
                     from gemini_services import generate_audio
-                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice)
+                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.gemini_api_key or "")
 
             # Generate image (skip if already exists - resume support)
             if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
@@ -137,6 +148,9 @@ def run_asset_generation(job_id: str, request: VideoRequest):
                     openai_image_size=request.openai_image_size,
                     togetherai_width=request.togetherai_width,
                     togetherai_height=request.togetherai_height,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    together_api_key=request.together_api_key or "",
                 )
 
             job["progress"] = int(((index + 1) / total_scenes) * 100)
@@ -219,10 +233,10 @@ def run_video_generation(job_id: str, request: VideoRequest):
                 job["message"] = f"Scene {index + 1}/{total_scenes}: Generating audio..."
                 if request.speech_provider == "openai":
                     from openai_services import generate_audio_openai
-                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice)
+                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.openai_api_key or "")
                 else:
                     from gemini_services import generate_audio
-                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice)
+                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.gemini_api_key or "")
 
             # Generate image (skip if already exists - resume support)
             if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
@@ -237,6 +251,9 @@ def run_video_generation(job_id: str, request: VideoRequest):
                     openai_image_size=request.openai_image_size,
                     togetherai_width=request.togetherai_width,
                     togetherai_height=request.togetherai_height,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    together_api_key=request.together_api_key or "",
                 )
 
             job["progress"] = int(((index + 1) / total_scenes) * 90)
@@ -412,6 +429,9 @@ async def regenerate_image(job_id: str, scene_index: int):
             openai_image_size=request_data.get("openai_image_size", "1024x1024"),
             togetherai_width=request_data.get("togetherai_width", 1024),
             togetherai_height=request_data.get("togetherai_height", 576),
+            gemini_api_key=request_data.get("gemini_api_key", ""),
+            openai_api_key=request_data.get("openai_api_key", ""),
+            together_api_key=request_data.get("together_api_key", ""),
         )
         if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
             return {"success": True, "message": f"Image for scene {scene_index + 1} regenerated"}
@@ -514,10 +534,10 @@ async def test_audio(request: TestAudioRequest):
     try:
         if request.speech_provider == "openai":
             from openai_services import generate_audio_openai
-            success = generate_audio_openai(request.text, audio_path, model=request.speech_model, voice=request.speech_voice)
+            success = generate_audio_openai(request.text, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.openai_api_key or "")
         else:
             from gemini_services import generate_audio
-            success = generate_audio(request.text, audio_path, model=request.speech_model, voice=request.speech_voice)
+            success = generate_audio(request.text, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.gemini_api_key or "")
 
         if success:
             return FileResponse(audio_path, media_type="audio/wav", filename="test_audio.wav")
@@ -544,6 +564,9 @@ async def test_image(request: TestImageRequest):
             openai_image_size=request.openai_image_size,
             togetherai_width=request.togetherai_width,
             togetherai_height=request.togetherai_height,
+            gemini_api_key=request.gemini_api_key or "",
+            openai_api_key=request.openai_api_key or "",
+            together_api_key=request.together_api_key or "",
         )
 
         if success:

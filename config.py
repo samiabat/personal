@@ -7,20 +7,23 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 
-def get_gemini_client():
+def get_gemini_client(api_key: str = ""):
     from google import genai
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY not found in .env file")
-    return genai.Client(api_key=GEMINI_API_KEY)
+    key = api_key or GEMINI_API_KEY
+    if not key:
+        raise ValueError("GEMINI_API_KEY not provided. Add it in Settings or set it in .env file.")
+    return genai.Client(api_key=key)
 
-def get_openai_client():
+def get_openai_client(api_key: str = ""):
     from openai import OpenAI
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY not found in .env file")
-    return OpenAI(api_key=OPENAI_API_KEY)
+    key = api_key or OPENAI_API_KEY
+    if not key:
+        raise ValueError("OPENAI_API_KEY not provided. Add it in Settings or set it in .env file.")
+    return OpenAI(api_key=key)
 
-def get_together_client():
+def get_together_client(api_key: str = ""):
     from together import Together
-    if not TOGETHER_API_KEY:
-        raise ValueError("TOGETHER_API_KEY not found in .env file")
-    return Together(api_key=TOGETHER_API_KEY)
+    key = api_key or TOGETHER_API_KEY
+    if not key:
+        raise ValueError("TOGETHER_API_KEY not provided. Add it in Settings or set it in .env file.")
+    return Together(api_key=key)
