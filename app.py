@@ -45,6 +45,7 @@ class VideoRequest(BaseModel):
     togetherai_width: int = 1024
     togetherai_height: int = 576
     resolution: str = "1080p"
+    orientation: str = "landscape"
     enable_ken_burns: bool = False
     enable_zoom: bool = False
     enable_shake: bool = False
@@ -148,6 +149,7 @@ def run_video_generation(job_id: str, request: VideoRequest):
         output_path = assemble_final_video(
             total_scenes, job_dir, "output.mp4",
             resolution=request.resolution,
+            orientation=request.orientation,
             enable_ken_burns=request.enable_ken_burns,
             enable_zoom=request.enable_zoom,
             enable_shake=request.enable_shake,
@@ -389,11 +391,15 @@ async def get_models():
             {"value": "768x1024", "label": "768×1024 (Portrait)"},
         ],
         "resolutions": [
-            {"value": "480p", "label": "480p (854×480)"},
-            {"value": "720p", "label": "720p (1280×720)"},
-            {"value": "1080p", "label": "1080p (1920×1080)"},
-            {"value": "1440p", "label": "1440p (2560×1440)"},
-            {"value": "4K", "label": "4K (3840×2160)"},
+            {"value": "480p", "label": "480p"},
+            {"value": "720p", "label": "720p"},
+            {"value": "1080p", "label": "1080p"},
+            {"value": "1440p", "label": "1440p"},
+            {"value": "4K", "label": "4K"},
+        ],
+        "orientations": [
+            {"value": "landscape", "label": "Landscape (16:9)"},
+            {"value": "portrait", "label": "Portrait (9:16)"},
         ],
         "aspect_ratios": [
             {"value": "16:9", "label": "16:9 (Widescreen)"},

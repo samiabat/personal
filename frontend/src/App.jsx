@@ -33,6 +33,7 @@ function App() {
   const [customImageModel, setCustomImageModel] = useState('')
   const [useCustomImageModel, setUseCustomImageModel] = useState(false)
   const [resolution, setResolution] = useState('1080p')
+  const [orientation, setOrientation] = useState('landscape')
   const [aspectRatio, setAspectRatio] = useState('16:9')
   const [imageSize, setImageSize] = useState('512')
   const [openaiImageSize, setOpenaiImageSize] = useState('1024x1024')
@@ -185,6 +186,7 @@ function App() {
           togetherai_width: togDims.width,
           togetherai_height: togDims.height,
           resolution,
+          orientation,
           enable_zoom: enableZoom,
           enable_shake: enableShake,
         }),
@@ -466,7 +468,7 @@ function App() {
         <div className="nav-inner">
           <div className="nav-brand" onClick={() => setActiveTab('dashboard')}>
             <span className="nav-logo-icon">🎬</span>
-            <span className="nav-logo-text">VideoForge<span className="nav-logo-ai">AI</span></span>
+            <span className="nav-logo-text">Omniva <span className="nav-logo-ai">Video Forge</span></span>
           </div>
           <div className="nav-links">
             <button className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
@@ -483,6 +485,9 @@ function App() {
             </button>
             <button className={`nav-link ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}>
               📈 Analytics
+            </button>
+            <button className={`nav-link ${activeTab === 'pricing' ? 'active' : ''}`} onClick={() => setActiveTab('pricing')}>
+              💎 Pricing
             </button>
             <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
               ⚙️ Settings
@@ -555,7 +560,7 @@ function App() {
                 <h2>🚀 Quick Start</h2>
               </div>
               <div className="placeholder-content">
-                <p>Welcome to VideoForge AI — a multi-provider AI video generation platform. Use the navigation above to create videos, test individual components, browse templates, or view analytics.</p>
+                <p>Welcome to Omniva Video Forge — a multi-provider AI video generation platform. Use the navigation above to create videos, test individual components, browse templates, or view analytics.</p>
                 <p>To get started, navigate to <strong>Create Video</strong> to compose scenes with voiceover text and image prompts, then generate a fully assembled video with optional Ken Burns effects.</p>
               </div>
             </div>
@@ -589,13 +594,26 @@ function App() {
 
               <div className="settings-section">
                 <h3 className="section-title">🎞️ Video Settings</h3>
-                <div className="form-group">
-                  <label>Output Resolution</label>
-                  <select value={resolution} onChange={e => setResolution(e.target.value)}>
-                    {models?.resolutions?.map(r => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
-                    ))}
-                  </select>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Output Resolution</label>
+                    <select value={resolution} onChange={e => setResolution(e.target.value)}>
+                      {models?.resolutions?.map(r => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Orientation</label>
+                    <select value={orientation} onChange={e => setOrientation(e.target.value)}>
+                      {models?.orientations?.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <p className="help-text">
+                      {orientation === 'portrait' ? 'Vertical video for YouTube Shorts, Instagram Reels & TikTok' : 'Standard widescreen video'}
+                    </p>
+                  </div>
                 </div>
                 <div className="effects-grid">
                   <div className="effect-card">
@@ -918,6 +936,64 @@ function App() {
           </div>
         )}
 
+        {/* ─── Pricing Page ─── */}
+        {activeTab === 'pricing' && (
+          <div className="page-content">
+            <div className="page-header" style={{ textAlign: 'center' }}>
+              <h1>Pricing</h1>
+              <p className="page-subtitle">Simple, transparent pricing for every creator</p>
+            </div>
+            <div className="pricing-grid">
+              <div className="card pricing-card">
+                <div className="pricing-tier">Free</div>
+                <div className="pricing-price">$0<span className="pricing-period">/month</span></div>
+                <ul className="pricing-features">
+                  <li>✓ 5 videos per month</li>
+                  <li>✓ Up to 720p resolution</li>
+                  <li>✓ Landscape orientation</li>
+                  <li>✓ Google Gemini provider</li>
+                  <li>✓ Basic templates</li>
+                  <li className="pricing-feature-disabled">✗ Portrait / vertical video</li>
+                  <li className="pricing-feature-disabled">✗ Ken Burns effects</li>
+                  <li className="pricing-feature-disabled">✗ Priority rendering</li>
+                </ul>
+                <button className="btn btn-secondary btn-block">Get Started</button>
+              </div>
+              <div className="card pricing-card pricing-card-featured">
+                <div className="pricing-badge">Most Popular</div>
+                <div className="pricing-tier">Pro</div>
+                <div className="pricing-price">$19<span className="pricing-period">/month</span></div>
+                <ul className="pricing-features">
+                  <li>✓ 50 videos per month</li>
+                  <li>✓ Up to 1080p resolution</li>
+                  <li>✓ Landscape &amp; Portrait</li>
+                  <li>✓ All AI providers</li>
+                  <li>✓ All templates</li>
+                  <li>✓ Ken Burns effects</li>
+                  <li>✓ Custom models</li>
+                  <li className="pricing-feature-disabled">✗ Priority rendering</li>
+                </ul>
+                <button className="btn btn-primary btn-block btn-glow">Upgrade to Pro</button>
+              </div>
+              <div className="card pricing-card">
+                <div className="pricing-tier">Enterprise</div>
+                <div className="pricing-price">$49<span className="pricing-period">/month</span></div>
+                <ul className="pricing-features">
+                  <li>✓ Unlimited videos</li>
+                  <li>✓ Up to 4K resolution</li>
+                  <li>✓ All orientations</li>
+                  <li>✓ All AI providers</li>
+                  <li>✓ All templates</li>
+                  <li>✓ All effects</li>
+                  <li>✓ Custom models</li>
+                  <li>✓ Priority rendering</li>
+                </ul>
+                <button className="btn btn-secondary btn-block">Contact Sales</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ─── Settings Page (Placeholder) ─── */}
         {activeTab === 'settings' && (
           <div className="page-content">
@@ -955,7 +1031,43 @@ function App() {
 
       {/* Footer */}
       <footer className="app-footer">
-        <p>VideoForge AI — Powered by Gemini, OpenAI & Together AI</p>
+        <div className="footer-inner">
+          <div className="footer-grid">
+            <div className="footer-section">
+              <h4 className="footer-brand">🎬 Omniva Video Forge</h4>
+              <p>AI-powered video generation platform. Create stunning videos with multiple AI providers including Google Gemini, OpenAI, and Together AI.</p>
+            </div>
+            <div className="footer-section">
+              <h4>Omniva Labs Products</h4>
+              <ul className="footer-links">
+                <li><span>🎬 Omniva Video Forge</span></li>
+                <li><span>📈 Omniva Trading Journal</span></li>
+                <li><span>🛒 Omniva Market Place</span></li>
+              </ul>
+            </div>
+            <div className="footer-section">
+              <h4>Resources</h4>
+              <ul className="footer-links">
+                <li><span>Documentation</span></li>
+                <li><span>API Reference</span></li>
+                <li><span>Templates</span></li>
+                <li><span>Support</span></li>
+              </ul>
+            </div>
+            <div className="footer-section">
+              <h4>Company</h4>
+              <ul className="footer-links">
+                <li><span>About Omniva Labs</span></li>
+                <li><span>Privacy Policy</span></li>
+                <li><span>Terms of Service</span></li>
+                <li><span>Contact</span></li>
+              </ul>
+            </div>
+          </div>
+          <div className="footer-bottom">
+            <p>© {new Date().getFullYear()} Omniva Labs. All rights reserved. — Built by a solo developer with ❤️</p>
+          </div>
+        </div>
       </footer>
     </div>
   )
