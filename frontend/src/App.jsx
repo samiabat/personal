@@ -15,9 +15,15 @@ const DEFAULT_SCENES_EXAMPLE = `[
 ]`
 
 function App() {
-  const [activeTab, setActiveTab] = useState('create')
+  const [activeTab, setActiveTab] = useState('home')
   const [models, setModels] = useState(null)
   const [error, setError] = useState('')
+
+  // API Keys (user-provided, prioritized over .env)
+  const [geminiApiKey, setGeminiApiKey] = useState('')
+  const [openaiApiKey, setOpenaiApiKey] = useState('')
+  const [togetherApiKey, setTogetherApiKey] = useState('')
+  const [apiKeysSaved, setApiKeysSaved] = useState(false)
 
   // Generation settings
   const [scenesText, setScenesText] = useState('')
@@ -218,6 +224,9 @@ function App() {
           orientation,
           enable_zoom: enableZoom,
           enable_shake: enableShake,
+          gemini_api_key: geminiApiKey,
+          openai_api_key: openaiApiKey,
+          together_api_key: togetherApiKey,
         }),
       })
 
@@ -370,6 +379,8 @@ function App() {
           speech_provider: speechProvider,
           speech_model: getActiveSpeechModel(),
           speech_voice: getActiveVoice(),
+          gemini_api_key: geminiApiKey,
+          openai_api_key: openaiApiKey,
         }),
       })
 
@@ -409,6 +420,9 @@ function App() {
           openai_image_size: openaiImageSize,
           togetherai_width: togDims.width,
           togetherai_height: togDims.height,
+          gemini_api_key: geminiApiKey,
+          openai_api_key: openaiApiKey,
+          together_api_key: togetherApiKey,
         }),
       })
 
@@ -572,13 +586,13 @@ function App() {
       {/* Top Navigation Bar */}
       <nav className="top-nav">
         <div className="nav-inner">
-          <div className="nav-brand" onClick={() => setActiveTab('dashboard')}>
+          <div className="nav-brand" onClick={() => setActiveTab('home')}>
             <span className="nav-logo-icon">🎬</span>
             <span className="nav-logo-text">Omniva <span className="nav-logo-ai">Video Forge</span></span>
           </div>
           <div className="nav-links">
-            <button className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-              📊 Dashboard
+            <button className={`nav-link ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
+              🏠 Home
             </button>
             <button className={`nav-link ${activeTab === 'create' ? 'active' : ''}`} onClick={() => setActiveTab('create')}>
               🎥 Create Video
@@ -588,9 +602,6 @@ function App() {
             </button>
             <button className={`nav-link ${activeTab === 'templates' ? 'active' : ''}`} onClick={() => setActiveTab('templates')}>
               📁 Templates
-            </button>
-            <button className={`nav-link ${activeTab === 'analytics' ? 'active' : ''}`} onClick={() => setActiveTab('analytics')}>
-              📈 Analytics
             </button>
             <button className={`nav-link ${activeTab === 'pricing' ? 'active' : ''}`} onClick={() => setActiveTab('pricing')}>
               💎 Pricing
@@ -616,60 +627,157 @@ function App() {
           </div>
         )}
 
-        {/* ─── Dashboard Page ─── */}
-        {activeTab === 'dashboard' && (
-          <div className="page-content">
-            <div className="page-header">
-              <h1>Dashboard</h1>
-              <p className="page-subtitle">Overview of your video generation activity</p>
-            </div>
-            <div className="stats-grid">
-              <div className="stat-card">
-                <span className="stat-icon">🎬</span>
-                <div className="stat-info">
-                  <span className="stat-value">0</span>
-                  <span className="stat-label">Videos Created</span>
+        {/* ─── Home / Landing Page ─── */}
+        {activeTab === 'home' && (
+          <div className="page-content landing-page">
+            {/* Hero Section */}
+            <section className="hero-section">
+              <div className="hero-badge">🚀 AI-Powered Video Generation Platform</div>
+              <h1 className="hero-title">
+                Create Stunning Videos <br />
+                <span className="hero-gradient">with AI in Minutes</span>
+              </h1>
+              <p className="hero-description">
+                Transform your ideas into professional videos using multiple AI providers.
+                Generate voiceovers, images, and fully assembled videos — all from simple text prompts.
+              </p>
+              <div className="hero-actions">
+                <button className="btn btn-primary btn-lg btn-glow" onClick={() => setActiveTab('create')}>
+                  🎬 Start Creating — Free
+                </button>
+                <button className="btn btn-outline btn-lg" onClick={() => setActiveTab('pricing')}>
+                  View Pricing
+                </button>
+              </div>
+              <div className="hero-stats-row">
+                <div className="hero-stat">
+                  <span className="hero-stat-value">3+</span>
+                  <span className="hero-stat-label">AI Providers</span>
+                </div>
+                <div className="hero-stat-divider"></div>
+                <div className="hero-stat">
+                  <span className="hero-stat-value">15+</span>
+                  <span className="hero-stat-label">AI Models</span>
+                </div>
+                <div className="hero-stat-divider"></div>
+                <div className="hero-stat">
+                  <span className="hero-stat-value">4K</span>
+                  <span className="hero-stat-label">Max Resolution</span>
+                </div>
+                <div className="hero-stat-divider"></div>
+                <div className="hero-stat">
+                  <span className="hero-stat-value">BYO</span>
+                  <span className="hero-stat-label">API Keys</span>
                 </div>
               </div>
-              <div className="stat-card">
-                <span className="stat-icon">🖼️</span>
-                <div className="stat-info">
-                  <span className="stat-value">0</span>
-                  <span className="stat-label">Images Generated</span>
+            </section>
+
+            {/* Features Grid */}
+            <section className="landing-section">
+              <div className="section-header-center">
+                <h2>Everything You Need to Create Professional Videos</h2>
+                <p>A complete AI video production pipeline — from script to screen.</p>
+              </div>
+              <div className="features-grid">
+                {[
+                  { icon: '🎙️', title: 'AI Voiceover', desc: 'Natural-sounding text-to-speech using Google Gemini or OpenAI. Choose from dozens of voices and models.' },
+                  { icon: '🖼️', title: 'AI Image Generation', desc: 'Generate stunning visuals with Gemini, OpenAI DALL·E, or Together AI FLUX models.' },
+                  { icon: '🎬', title: 'Automated Assembly', desc: 'Audio and images are automatically assembled into polished videos with transitions and effects.' },
+                  { icon: '🔍', title: 'Ken Burns Effects', desc: 'Add cinematic zoom and pan effects to bring static images to life in your videos.' },
+                  { icon: '📱', title: 'Portrait & Landscape', desc: 'Create videos in any orientation — landscape for YouTube, portrait for Shorts, Reels & TikTok.' },
+                  { icon: '🔑', title: 'Bring Your Own Keys', desc: 'Use your own API keys for complete control over costs, or use our hosted keys to get started instantly.' },
+                ].map((f, i) => (
+                  <div className="feature-card" key={i}>
+                    <div className="feature-icon">{f.icon}</div>
+                    <h3>{f.title}</h3>
+                    <p>{f.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* How It Works */}
+            <section className="landing-section">
+              <div className="section-header-center">
+                <h2>How It Works</h2>
+                <p>Three simple steps to create your AI-powered video.</p>
+              </div>
+              <div className="how-it-works-grid">
+                <div className="how-step">
+                  <div className="how-step-number">1</div>
+                  <h3>Define Your Scenes</h3>
+                  <p>Write your voiceover text and image prompts for each scene. Use our templates or create custom content from scratch.</p>
+                </div>
+                <div className="how-step-connector">
+                  <span className="how-step-arrow">→</span>
+                </div>
+                <div className="how-step">
+                  <div className="how-step-number">2</div>
+                  <h3>Review & Refine</h3>
+                  <p>Preview generated audio and images. Regenerate any scene that doesn&apos;t look right until you&apos;re satisfied.</p>
+                </div>
+                <div className="how-step-connector">
+                  <span className="how-step-arrow">→</span>
+                </div>
+                <div className="how-step">
+                  <div className="how-step-number">3</div>
+                  <h3>Download Your Video</h3>
+                  <p>Approve your assets and we&apos;ll assemble a polished video ready to share on any platform.</p>
                 </div>
               </div>
-              <div className="stat-card">
-                <span className="stat-icon">🔊</span>
-                <div className="stat-info">
-                  <span className="stat-value">0</span>
-                  <span className="stat-label">Audio Clips</span>
+            </section>
+
+            {/* Providers */}
+            <section className="landing-section">
+              <div className="section-header-center">
+                <h2>Powered by Leading AI Providers</h2>
+                <p>Choose the best model for your needs — switch providers anytime.</p>
+              </div>
+              <div className="providers-grid">
+                <div className="provider-card">
+                  <div className="provider-icon">✦</div>
+                  <h3>Google Gemini</h3>
+                  <p>State-of-the-art TTS and image generation with Gemini 2.5 Pro, Flash, and Imagen 3.0 models.</p>
+                  <div className="provider-tags">
+                    <span className="provider-tag">Speech</span>
+                    <span className="provider-tag">Images</span>
+                  </div>
+                </div>
+                <div className="provider-card">
+                  <div className="provider-icon">◆</div>
+                  <h3>OpenAI</h3>
+                  <p>Premium TTS voices with GPT-4o Mini and high-quality image generation with DALL·E and GPT Image models.</p>
+                  <div className="provider-tags">
+                    <span className="provider-tag">Speech</span>
+                    <span className="provider-tag">Images</span>
+                  </div>
+                </div>
+                <div className="provider-card">
+                  <div className="provider-icon">▲</div>
+                  <h3>Together AI</h3>
+                  <p>Open-source image models including FLUX.1, Stable Diffusion XL, and DreamShaper for fast, affordable generation.</p>
+                  <div className="provider-tags">
+                    <span className="provider-tag">Images</span>
+                  </div>
                 </div>
               </div>
-              <div className="stat-card">
-                <span className="stat-icon">⏱️</span>
-                <div className="stat-info">
-                  <span className="stat-value">0 min</span>
-                  <span className="stat-label">Total Duration</span>
+            </section>
+
+            {/* CTA */}
+            <section className="landing-section cta-section">
+              <div className="cta-card">
+                <h2>Ready to Create Your First Video?</h2>
+                <p>Get started for free — no credit card required. Bring your own API keys or use our hosted service.</p>
+                <div className="hero-actions">
+                  <button className="btn btn-primary btn-lg btn-glow" onClick={() => setActiveTab('create')}>
+                    🎬 Create Your First Video
+                  </button>
+                  <button className="btn btn-outline btn-lg" onClick={() => setActiveTab('settings')}>
+                    🔑 Configure API Keys
+                  </button>
                 </div>
               </div>
-            </div>
-            <div className="card">
-              <div className="card-header">
-                <h2>🕐 Recent Activity</h2>
-              </div>
-              <div className="placeholder-content">
-                <p>Your recent video generation history will appear here. Start by creating your first video from the <strong>Create Video</strong> page.</p>
-              </div>
-            </div>
-            <div className="card">
-              <div className="card-header">
-                <h2>🚀 Quick Start</h2>
-              </div>
-              <div className="placeholder-content">
-                <p>Welcome to Omniva Video Forge — a multi-provider AI video generation platform. Use the navigation above to create videos, test individual components, browse templates, or view analytics.</p>
-                <p>To get started, navigate to <strong>Create Video</strong> to compose scenes with voiceover text and image prompts, then generate a fully assembled video with optional Ken Burns effects.</p>
-              </div>
-            </div>
+            </section>
           </div>
         )}
 
@@ -1114,62 +1222,6 @@ function App() {
           </div>
         )}
 
-        {/* ─── Analytics Page (Placeholder) ─── */}
-        {activeTab === 'analytics' && (
-          <div className="page-content">
-            <div className="page-header">
-              <h1>Analytics</h1>
-              <p className="page-subtitle">Track your usage, generation history, and performance metrics</p>
-            </div>
-            <div className="stats-grid">
-              <div className="stat-card">
-                <span className="stat-icon">📊</span>
-                <div className="stat-info">
-                  <span className="stat-value">—</span>
-                  <span className="stat-label">Generations This Month</span>
-                </div>
-              </div>
-              <div className="stat-card">
-                <span className="stat-icon">⏱️</span>
-                <div className="stat-info">
-                  <span className="stat-value">—</span>
-                  <span className="stat-label">Avg. Generation Time</span>
-                </div>
-              </div>
-              <div className="stat-card">
-                <span className="stat-icon">✅</span>
-                <div className="stat-info">
-                  <span className="stat-value">—</span>
-                  <span className="stat-label">Success Rate</span>
-                </div>
-              </div>
-              <div className="stat-card">
-                <span className="stat-icon">💾</span>
-                <div className="stat-info">
-                  <span className="stat-value">—</span>
-                  <span className="stat-label">Storage Used</span>
-                </div>
-              </div>
-            </div>
-            <div className="card">
-              <div className="card-header">
-                <h2>📈 Usage Over Time</h2>
-              </div>
-              <div className="placeholder-content">
-                <p>Detailed usage charts and generation history will be available here. Track trends in your video creation workflow, monitor API costs, and identify the most efficient provider and model combinations for your content.</p>
-              </div>
-            </div>
-            <div className="card">
-              <div className="card-header">
-                <h2>🏆 Provider Comparison</h2>
-              </div>
-              <div className="placeholder-content">
-                <p>Compare generation quality, speed, and cost across different AI providers. Analyze which combinations of speech and image models produce the best results for your specific use cases.</p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* ─── Pricing Page ─── */}
         {activeTab === 'pricing' && (
           <div className="page-content">
@@ -1228,19 +1280,84 @@ function App() {
           </div>
         )}
 
-        {/* ─── Settings Page (Placeholder) ─── */}
+        {/* ─── Settings Page ─── */}
         {activeTab === 'settings' && (
           <div className="page-content">
             <div className="page-header">
               <h1>Settings</h1>
-              <p className="page-subtitle">Manage your account, API keys, and application preferences</p>
+              <p className="page-subtitle">Manage your API keys and application preferences</p>
             </div>
             <div className="card">
               <div className="card-header">
                 <h2>🔑 API Keys</h2>
+                <span className="card-badge">Required</span>
               </div>
-              <div className="placeholder-content">
-                <p>Configure your API keys for Google Gemini, OpenAI, and Together AI. All keys are stored securely and encrypted at rest. You can rotate keys at any time without affecting your existing generated content.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem', lineHeight: '1.6' }}>
+                Add your API keys below to use the corresponding AI providers. Keys entered here take priority over server-configured keys.
+                If left empty, the system will fall back to keys configured in the server&apos;s <code style={{ background: 'var(--bg-tertiary)', padding: '0.15rem 0.4rem', borderRadius: '4px', fontSize: '0.82rem' }}>.env</code> file.
+              </p>
+
+              {apiKeysSaved && (
+                <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+                  <span>✅ API keys saved to this session.</span>
+                  <button onClick={() => setApiKeysSaved(false)} className="alert-close">✕</button>
+                </div>
+              )}
+
+              <div className="api-key-grid">
+                <div className="api-key-item">
+                  <div className="api-key-header">
+                    <span className="api-key-provider">✦ Google Gemini</span>
+                    <span className={`api-key-status ${geminiApiKey ? 'configured' : ''}`}>
+                      {geminiApiKey ? '● Configured' : '○ Not set'}
+                    </span>
+                  </div>
+                  <p className="api-key-desc">Used for Gemini TTS (speech) and Gemini / Imagen image generation.</p>
+                  <input
+                    type="password"
+                    placeholder="Enter your Gemini API key..."
+                    value={geminiApiKey}
+                    onChange={e => { setGeminiApiKey(e.target.value); setApiKeysSaved(false) }}
+                  />
+                </div>
+                <div className="api-key-item">
+                  <div className="api-key-header">
+                    <span className="api-key-provider">◆ OpenAI</span>
+                    <span className={`api-key-status ${openaiApiKey ? 'configured' : ''}`}>
+                      {openaiApiKey ? '● Configured' : '○ Not set'}
+                    </span>
+                  </div>
+                  <p className="api-key-desc">Used for OpenAI TTS voices and GPT Image / DALL·E image generation.</p>
+                  <input
+                    type="password"
+                    placeholder="Enter your OpenAI API key..."
+                    value={openaiApiKey}
+                    onChange={e => { setOpenaiApiKey(e.target.value); setApiKeysSaved(false) }}
+                  />
+                </div>
+                <div className="api-key-item">
+                  <div className="api-key-header">
+                    <span className="api-key-provider">▲ Together AI</span>
+                    <span className={`api-key-status ${togetherApiKey ? 'configured' : ''}`}>
+                      {togetherApiKey ? '● Configured' : '○ Not set'}
+                    </span>
+                  </div>
+                  <p className="api-key-desc">Used for open-source image models like FLUX.1, Stable Diffusion XL, and DreamShaper.</p>
+                  <input
+                    type="password"
+                    placeholder="Enter your Together AI API key..."
+                    value={togetherApiKey}
+                    onChange={e => { setTogetherApiKey(e.target.value); setApiKeysSaved(false) }}
+                  />
+                </div>
+              </div>
+              <div style={{ marginTop: '1.25rem' }}>
+                <button className="btn btn-primary" onClick={() => setApiKeysSaved(true)}>
+                  💾 Save API Keys
+                </button>
+                <span style={{ marginLeft: '0.75rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Keys are stored in your browser session only — never sent to third parties.
+                </span>
               </div>
             </div>
             <div className="card">

@@ -28,9 +28,9 @@ def _convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
     )
     return header + audio_data
 
-def generate_audio(text: str, output_path: str, model: str = "gemini-2.5-pro-preview-tts", voice: str = "Charon"):
+def generate_audio(text: str, output_path: str, model: str = "gemini-2.5-pro-preview-tts", voice: str = "Charon", api_key: str = ""):
     """Generates voiceover and saves to output_path."""
-    client = get_gemini_client()
+    client = get_gemini_client(api_key)
     tts_config = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -59,9 +59,9 @@ def generate_audio(text: str, output_path: str, model: str = "gemini-2.5-pro-pre
         return True
     return False
 
-def generate_image(prompt: str, output_path: str, model: str = "gemini-3.1-flash-image-preview", aspect_ratio: str = "16:9", image_size: str = "512"):
+def generate_image(prompt: str, output_path: str, model: str = "gemini-3.1-flash-image-preview", aspect_ratio: str = "16:9", image_size: str = "512", api_key: str = ""):
     """Generates an image and saves to output_path."""
-    client = get_gemini_client()
+    client = get_gemini_client(api_key)
     img_response = client.models.generate_content(
         model=model,
         contents=prompt,

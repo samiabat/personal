@@ -3,9 +3,9 @@ import requests
 from config import get_openai_client, get_together_client, TOGETHER_API_KEY
 
 
-def generate_image_openai(prompt: str, output_path: str, model: str = "gpt-image-1", size: str = "1024x1024"):
+def generate_image_openai(prompt: str, output_path: str, model: str = "gpt-image-1", size: str = "1024x1024", api_key: str = ""):
     """Generates an image using OpenAI and saves to output_path."""
-    client = get_openai_client()
+    client = get_openai_client(api_key)
     result = client.images.generate(
         model=model,
         prompt=prompt,
@@ -29,9 +29,9 @@ def generate_image_openai(prompt: str, output_path: str, model: str = "gpt-image
 
 
 def generate_image_togetherai(prompt: str, output_path: str, model: str = "black-forest-labs/FLUX.1-schnell",
-                               width: int = 1024, height: int = 576):
+                               width: int = 1024, height: int = 576, api_key: str = ""):
     """Generates an image using Together AI and saves to output_path."""
-    client = get_together_client()
+    client = get_together_client(api_key)
     response = client.images.generate(
         prompt=prompt,
         model=model,
