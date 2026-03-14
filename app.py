@@ -94,8 +94,107 @@ def _generate_image_for_provider(provider: str, prompt: str, image_path: str, **
         )
 
 
+def run_asset_generation(job_id: str, request: VideoRequest):
+    """Background task to generate audio + images only (no video assembly)."""
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+
+    total_scenes = len(request.scenes)
+
+    try:
+        for index, scene in enumerate(request.scenes):
+            progress = int((index / total_scenes) * 100)
+            job["progress"] = progress
+            job["status"] = "processing"
+            job["message"] = f"Generating scene {index + 1}/{total_scenes}..."
+
+            audio_path = f"{job_dir}/scene_{index}_audio.wav"
+            image_path = f"{job_dir}/scene_{index}_image.jpg"
+
+            # Generate audio (skip if already exists - resume support)
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                job["message"] = f"Scene {index + 1}/{total_scenes}: Audio already exists, skipping..."
+            else:
+                job["message"] = f"Scene {index + 1}/{total_scenes}: Generating audio..."
+                if request.speech_provider == "openai":
+                    from openai_services import generate_audio_openai
+                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice)
+                else:
+                    from gemini_services import generate_audio
+                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice)
+
+            # Generate image (skip if already exists - resume support)
+            if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+                job["message"] = f"Scene {index + 1}/{total_scenes}: Image already exists, skipping..."
+            else:
+                job["message"] = f"Scene {index + 1}/{total_scenes}: Generating image..."
+                _generate_image_for_provider(
+                    request.image_provider, scene.prompt, image_path,
+                    image_model=request.image_model,
+                    aspect_ratio=request.aspect_ratio,
+                    image_size=request.image_size,
+                    openai_image_size=request.openai_image_size,
+                    togetherai_width=request.togetherai_width,
+                    togetherai_height=request.togetherai_height,
+                )
+
+            job["progress"] = int(((index + 1) / total_scenes) * 100)
+
+        job["progress"] = 100
+        job["status"] = "assets_ready"
+        job["message"] = "Audio and images generated! Ready for review."
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
+def run_video_assembly(job_id: str, request: VideoRequest):
+    """Background task to assemble video from existing assets."""
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    total_scenes = len(request.scenes)
+
+    try:
+        job["progress"] = 10
+        job["status"] = "processing"
+        job["message"] = "Assembling final video..."
+        from video_editor import assemble_final_video
+        output_path = assemble_final_video(
+            total_scenes, job_dir, "output.mp4",
+            resolution=request.resolution,
+            orientation=request.orientation,
+            enable_ken_burns=request.enable_ken_burns,
+            enable_zoom=request.enable_zoom,
+            enable_shake=request.enable_shake,
+        )
+
+        # Clean up temp files
+        job["progress"] = 90
+        job["message"] = "Cleaning up temporary files..."
+        for index in range(total_scenes):
+            audio_path = f"{job_dir}/scene_{index}_audio.wav"
+            image_path = f"{job_dir}/scene_{index}_image.jpg"
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            if os.path.exists(image_path):
+                os.remove(image_path)
+
+        job["progress"] = 100
+        job["status"] = "completed"
+        job["message"] = "Video generation completed!"
+        job["output_path"] = output_path
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
 def run_video_generation(job_id: str, request: VideoRequest):
-    """Background task to generate video."""
+    """Background task to generate video (full pipeline: assets + assembly)."""
     job = jobs[job_id]
     job_dir = f"{JOBS_DIR}/{job_id}"
     os.makedirs(job_dir, exist_ok=True)
@@ -214,6 +313,149 @@ async def retry_job(job_id: str, background_tasks: BackgroundTasks):
     return {"job_id": job_id}
 
 
+@app.post("/api/generate-assets")
+async def generate_assets(request: VideoRequest, background_tasks: BackgroundTasks):
+    """Generate audio and images only (no video assembly). Returns job_id for tracking."""
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {
+        "id": job_id,
+        "status": "queued",
+        "progress": 0,
+        "message": "Job queued...",
+        "output_path": None,
+        "request": request.model_dump(),
+    }
+    background_tasks.add_task(run_asset_generation, job_id, request)
+    return {"job_id": job_id}
+
+
+@app.get("/api/job-assets/{job_id}")
+async def get_job_assets(job_id: str):
+    """Return list of generated assets for a job so user can review them."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    if job["status"] not in ("assets_ready", "approved"):
+        raise HTTPException(status_code=400, detail=f"Assets not ready (status: {job['status']})")
+
+    request_data = job["request"]
+    total_scenes = len(request_data["scenes"])
+    job_dir = f"{JOBS_DIR}/{job_id}"
+
+    assets = []
+    for i in range(total_scenes):
+        image_path = f"{job_dir}/scene_{i}_image.jpg"
+        audio_path = f"{job_dir}/scene_{i}_audio.wav"
+        assets.append({
+            "scene_index": i,
+            "prompt": request_data["scenes"][i]["prompt"],
+            "voiceover": request_data["scenes"][i]["voiceover"],
+            "has_image": os.path.exists(image_path) and os.path.getsize(image_path) > 0,
+            "has_audio": os.path.exists(audio_path) and os.path.getsize(audio_path) > 0,
+            "image_url": f"/api/scene-image/{job_id}/{i}",
+            "audio_url": f"/api/scene-audio/{job_id}/{i}",
+        })
+
+    return {"job_id": job_id, "total_scenes": total_scenes, "assets": assets}
+
+
+@app.get("/api/scene-image/{job_id}/{scene_index}")
+async def get_scene_image(job_id: str, scene_index: int):
+    """Serve a specific scene image for review."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    image_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_image.jpg"
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(image_path, media_type="image/jpeg")
+
+
+@app.get("/api/scene-audio/{job_id}/{scene_index}")
+async def get_scene_audio(job_id: str, scene_index: int):
+    """Serve a specific scene audio for review."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    audio_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_audio.wav"
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return FileResponse(audio_path, media_type="audio/wav")
+
+
+@app.post("/api/regenerate-image/{job_id}/{scene_index}")
+async def regenerate_image(job_id: str, scene_index: int):
+    """Regenerate a specific scene's image."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    if job["status"] not in ("assets_ready", "approved"):
+        raise HTTPException(status_code=400, detail="Assets not ready for regeneration")
+
+    request_data = job["request"]
+    scenes = request_data["scenes"]
+    if scene_index < 0 or scene_index >= len(scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+
+    image_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_image.jpg"
+
+    # Delete existing image
+    if os.path.exists(image_path):
+        os.remove(image_path)
+
+    try:
+        success = _generate_image_for_provider(
+            request_data.get("image_provider", "gemini"),
+            scenes[scene_index]["prompt"],
+            image_path,
+            image_model=request_data.get("image_model", "gemini-3.1-flash-image-preview"),
+            aspect_ratio=request_data.get("aspect_ratio", "16:9"),
+            image_size=request_data.get("image_size", "512"),
+            openai_image_size=request_data.get("openai_image_size", "1024x1024"),
+            togetherai_width=request_data.get("togetherai_width", 1024),
+            togetherai_height=request_data.get("togetherai_height", 576),
+        )
+        if success:
+            return {"success": True, "message": f"Image for scene {scene_index + 1} regenerated"}
+        raise HTTPException(status_code=500, detail="Image regeneration failed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/approve-assets/{job_id}")
+async def approve_assets(job_id: str):
+    """Mark assets as approved, enabling video assembly."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    if job["status"] != "assets_ready":
+        raise HTTPException(status_code=400, detail="Assets not in reviewable state")
+    job["status"] = "approved"
+    job["message"] = "Assets approved. Ready to prepare video."
+    return {"success": True}
+
+
+@app.post("/api/prepare-video/{job_id}")
+async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
+    """Assemble video from approved assets."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    if job["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Assets must be approved before video preparation")
+
+    request = VideoRequest(**job["request"])
+
+    # Reset progress for video assembly phase
+    job["status"] = "queued"
+    job["progress"] = 0
+    job["message"] = "Preparing video..."
+    job["output_path"] = None
+
+    background_tasks.add_task(run_video_assembly, job_id, request)
+    return {"job_id": job_id}
+
+
 @app.get("/api/progress/{job_id}")
 async def get_progress(job_id: str, request: Request):
     if job_id not in jobs:
@@ -234,7 +476,7 @@ async def get_progress(job_id: str, request: Request):
                     "message": job["message"],
                 })
             }
-            if job["status"] in ("completed", "failed"):
+            if job["status"] in ("completed", "failed", "assets_ready"):
                 break
             await asyncio.sleep(1)
 
