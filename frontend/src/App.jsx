@@ -71,6 +71,35 @@ function App() {
   const [testingAudio, setTestingAudio] = useState(false)
   const [testingImage, setTestingImage] = useState(false)
 
+  // Payment / Crypto
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [selectedPlan, setSelectedPlan] = useState(null)
+  const [selectedCrypto, setSelectedCrypto] = useState(null)
+  const [paymentCopied, setPaymentCopied] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const cryptoOptions = [
+    { id: 'usdc', name: 'USDC', icon: '💲', network: 'Ethereum / Polygon', address: '0x1234...your-usdc-address' },
+    { id: 'usdt', name: 'USDT', icon: '💵', network: 'Ethereum / Tron', address: '0x1234...your-usdt-address' },
+    { id: 'btc', name: 'Bitcoin', icon: '₿', network: 'Bitcoin Network', address: 'bc1q...your-btc-address' },
+    { id: 'eth', name: 'Ethereum', icon: 'Ξ', network: 'Ethereum Network', address: '0x1234...your-eth-address' },
+  ]
+
+  const handleSelectPlan = (plan) => {
+    if (plan.price === 0) return
+    setSelectedPlan(plan)
+    setSelectedCrypto(null)
+    setPaymentCopied(false)
+    setShowPaymentModal(true)
+  }
+
+  const handleCopyAddress = (address) => {
+    navigator.clipboard.writeText(address).then(() => {
+      setPaymentCopied(true)
+      setTimeout(() => setPaymentCopied(false), 2000)
+    })
+  }
+
   const eventSourceRef = useRef(null)
 
   // Load models on mount
@@ -587,28 +616,29 @@ function App() {
       <nav className="top-nav">
         <div className="nav-inner">
           <div className="nav-brand" onClick={() => setActiveTab('home')}>
-            <span className="nav-logo-icon">🎬</span>
+            <span className="nav-logo-mark">▶</span>
             <span className="nav-logo-text">Omniva <span className="nav-logo-ai">Video Forge</span></span>
           </div>
-          <div className="nav-links">
-            <button className={`nav-link ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')}>
-              🏠 Home
-            </button>
-            <button className={`nav-link ${activeTab === 'create' ? 'active' : ''}`} onClick={() => setActiveTab('create')}>
-              🎥 Create Video
-            </button>
-            <button className={`nav-link ${activeTab === 'test' ? 'active' : ''}`} onClick={() => setActiveTab('test')}>
-              🧪 Test Lab
-            </button>
-            <button className={`nav-link ${activeTab === 'templates' ? 'active' : ''}`} onClick={() => setActiveTab('templates')}>
-              📁 Templates
-            </button>
-            <button className={`nav-link ${activeTab === 'pricing' ? 'active' : ''}`} onClick={() => setActiveTab('pricing')}>
-              💎 Pricing
-            </button>
-            <button className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
-              ⚙️ Settings
-            </button>
+          <button className="nav-mobile-toggle" onClick={() => setMobileMenuOpen(prev => !prev)} aria-label="Toggle menu">
+            <span className={`hamburger ${mobileMenuOpen ? 'open' : ''}`} />
+          </button>
+          <div className={`nav-links ${mobileMenuOpen ? 'nav-links-open' : ''}`}>
+            {[
+              { key: 'home', label: 'Home' },
+              { key: 'create', label: 'Create' },
+              { key: 'test', label: 'Test Lab' },
+              { key: 'templates', label: 'Templates' },
+              { key: 'pricing', label: 'Pricing' },
+              { key: 'settings', label: 'Settings' },
+            ].map(item => (
+              <button
+                key={item.key}
+                className={`nav-link ${activeTab === item.key ? 'active' : ''}`}
+                onClick={() => { setActiveTab(item.key); setMobileMenuOpen(false) }}
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
           <div className="nav-actions">
             <button className="theme-toggle-btn" onClick={() => setDarkMode(prev => !prev)} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
@@ -1229,6 +1259,15 @@ function App() {
               <h1>Pricing</h1>
               <p className="page-subtitle">Simple, transparent pricing for every creator</p>
             </div>
+
+            {/* Africa-based crypto notice */}
+            <div className="crypto-notice">
+              <div className="crypto-notice-icon">🌍</div>
+              <div className="crypto-notice-text">
+                <strong>We are based in Africa</strong> — For now we only accept <strong>cryptocurrency</strong> payments. Credit card and PayPal support coming soon!
+              </div>
+            </div>
+
             <div className="pricing-grid">
               <div className="card pricing-card">
                 <div className="pricing-tier">Free</div>
@@ -1243,7 +1282,7 @@ function App() {
                   <li className="pricing-feature-disabled">✗ Ken Burns effects</li>
                   <li className="pricing-feature-disabled">✗ Priority rendering</li>
                 </ul>
-                <button className="btn btn-secondary btn-block">Get Started</button>
+                <button className="btn btn-secondary btn-block">Get Started Free</button>
               </div>
               <div className="card pricing-card pricing-card-featured">
                 <div className="pricing-badge">Most Popular</div>
@@ -1259,7 +1298,7 @@ function App() {
                   <li>✓ Custom models</li>
                   <li className="pricing-feature-disabled">✗ Priority rendering</li>
                 </ul>
-                <button className="btn btn-primary btn-block btn-glow">Upgrade to Pro</button>
+                <button className="btn btn-primary btn-block btn-glow" onClick={() => handleSelectPlan({ name: 'Pro', price: 19 })}>Pay with Crypto</button>
               </div>
               <div className="card pricing-card">
                 <div className="pricing-tier">Enterprise</div>
@@ -1274,8 +1313,112 @@ function App() {
                   <li>✓ Custom models</li>
                   <li>✓ Priority rendering</li>
                 </ul>
-                <button className="btn btn-secondary btn-block">Contact Sales</button>
+                <button className="btn btn-secondary btn-block" onClick={() => handleSelectPlan({ name: 'Enterprise', price: 49 })}>Pay with Crypto</button>
               </div>
+            </div>
+
+            {/* Payment methods info */}
+            <div className="payment-methods-section">
+              <h3>Accepted Payment Methods</h3>
+              <div className="payment-methods-grid">
+                <div className="payment-method-badge active">
+                  <span className="payment-method-icon">₿</span>
+                  <span>Bitcoin</span>
+                  <span className="payment-method-status available">Available</span>
+                </div>
+                <div className="payment-method-badge active">
+                  <span className="payment-method-icon">Ξ</span>
+                  <span>Ethereum</span>
+                  <span className="payment-method-status available">Available</span>
+                </div>
+                <div className="payment-method-badge active">
+                  <span className="payment-method-icon">💲</span>
+                  <span>USDC</span>
+                  <span className="payment-method-status available">Available</span>
+                </div>
+                <div className="payment-method-badge active">
+                  <span className="payment-method-icon">💵</span>
+                  <span>USDT</span>
+                  <span className="payment-method-status available">Available</span>
+                </div>
+                <div className="payment-method-badge disabled">
+                  <span className="payment-method-icon">💳</span>
+                  <span>Credit Card</span>
+                  <span className="payment-method-status coming-soon">Coming Soon</span>
+                </div>
+                <div className="payment-method-badge disabled">
+                  <span className="payment-method-icon">🅿️</span>
+                  <span>PayPal</span>
+                  <span className="payment-method-status coming-soon">Coming Soon</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Crypto Payment Modal ─── */}
+        {showPaymentModal && selectedPlan && (
+          <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
+            <div className="modal-payment" onClick={e => e.stopPropagation()}>
+              <button className="modal-close" onClick={() => setShowPaymentModal(false)}>✕</button>
+              <div className="modal-payment-header">
+                <h2>Pay with Crypto</h2>
+                <p>Subscribe to <strong>{selectedPlan.name}</strong> — <strong>${selectedPlan.price}/month</strong></p>
+              </div>
+
+              {!selectedCrypto ? (
+                <div className="crypto-select-section">
+                  <h3>Choose your cryptocurrency</h3>
+                  <div className="crypto-options-grid">
+                    {cryptoOptions.map(crypto => (
+                      <button
+                        key={crypto.id}
+                        className="crypto-option-card"
+                        onClick={() => setSelectedCrypto(crypto)}
+                      >
+                        <span className="crypto-option-icon">{crypto.icon}</span>
+                        <span className="crypto-option-name">{crypto.name}</span>
+                        <span className="crypto-option-network">{crypto.network}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="crypto-payment-details">
+                  <button className="crypto-back-btn" onClick={() => { setSelectedCrypto(null); setPaymentCopied(false) }}>
+                    ← Back to options
+                  </button>
+                  <div className="crypto-selected-header">
+                    <span className="crypto-selected-icon">{selectedCrypto.icon}</span>
+                    <span className="crypto-selected-name">{selectedCrypto.name}</span>
+                  </div>
+                  <div className="crypto-amount-box">
+                    <div className="crypto-amount-label">Amount to send</div>
+                    <div className="crypto-amount-value">${selectedPlan.price}.00 USD</div>
+                    <div className="crypto-amount-note">in {selectedCrypto.name} equivalent</div>
+                  </div>
+                  <div className="crypto-address-box">
+                    <div className="crypto-address-label">Send to this address ({selectedCrypto.network})</div>
+                    <div className="crypto-address-row">
+                      <code className="crypto-address">{selectedCrypto.address}</code>
+                      <button className="btn btn-sm" onClick={() => handleCopyAddress(selectedCrypto.address)}>
+                        {paymentCopied ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="crypto-instructions">
+                    <p><strong>Instructions:</strong></p>
+                    <ol>
+                      <li>Send the exact amount in {selectedCrypto.name} to the address above</li>
+                      <li>After sending, save your transaction hash</li>
+                      <li>Your plan will be activated within 30 minutes of confirmation</li>
+                    </ol>
+                  </div>
+                  <div className="crypto-support-note">
+                    Need help? Contact us at <strong>support@omnivalabs.com</strong>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
