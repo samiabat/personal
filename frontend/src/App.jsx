@@ -468,7 +468,7 @@ function App() {
         <div className="nav-inner">
           <div className="nav-brand" onClick={() => setActiveTab('dashboard')}>
             <span className="nav-logo-icon">🎬</span>
-            <span className="nav-logo-text">Omniva<span className="nav-logo-ai">VideoForge</span></span>
+            <span className="nav-logo-text">Omniva <span className="nav-logo-ai">Video Forge</span></span>
           </div>
           <div className="nav-links">
             <button className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
