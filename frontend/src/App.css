@@ -1080,6 +1080,191 @@ textarea.scene-editor {
   outline: none;
 }
 
+/* ─── Workflow Stepper ─── */
+.workflow-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 1.25rem 0;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.workflow-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  opacity: 0.4;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.workflow-step.active {
+  opacity: 1;
+}
+
+.workflow-step.completed {
+  opacity: 0.85;
+}
+
+.step-number {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  transition: all 0.3s;
+}
+
+.workflow-step.active .step-number {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.workflow-step.completed .step-number {
+  background: var(--success);
+  border-color: var(--success);
+  color: white;
+}
+
+.step-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.workflow-step.active .step-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.step-connector {
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  margin-bottom: 1.2rem;
+}
+
+.step-arrow {
+  font-size: 1.2rem;
+  color: var(--text-faint);
+  transition: color 0.3s;
+}
+
+.step-connector.active .step-arrow {
+  color: var(--success);
+}
+
+.workflow-action {
+  padding: 0.5rem 0;
+}
+
+/* ─── Review Grid ─── */
+.review-header {
+  margin-bottom: 1rem;
+}
+
+.review-header h3 {
+  margin-bottom: 0.25rem;
+}
+
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.review-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.review-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.review-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.review-scene-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.review-image-wrapper {
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  background: var(--bg-primary);
+}
+
+.review-image {
+  width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.review-image-placeholder {
+  color: var(--text-faint);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.review-prompt {
+  padding: 0.5rem 0.85rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.review-actions {
+  margin-top: 0.5rem;
+}
+
+.next-step-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.next-step-arrow {
+  font-size: 1.5rem;
+  color: var(--accent);
+  animation: bounceDown 1s ease infinite;
+}
+
+@keyframes bounceDown {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
   .stats-grid {
@@ -1136,6 +1321,19 @@ textarea.scene-editor {
   }
 
   .footer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-stepper {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .step-connector {
+    padding: 0 0.3rem;
+  }
+
+  .review-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -51,6 +51,12 @@ function App() {
   const [jobMessage, setJobMessage] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
 
+  // Step-based workflow
+  const [workflowStep, setWorkflowStep] = useState(0) // 0=not started, 1=generating, 2=review, 3=preparing video
+  const [reviewAssets, setReviewAssets] = useState([]) // [{scene_index, prompt, image_url, ...}]
+  const [regeneratingIndex, setRegeneratingIndex] = useState(null) // which scene is being regenerated
+  const [assetsApproved, setAssetsApproved] = useState(false)
+
   // Test panel
   const [testAudioText, setTestAudioText] = useState('Hello! This is a test of the text to speech system.')
   const [testImagePrompt, setTestImagePrompt] = useState('A beautiful sunset over the ocean with vibrant orange and purple colors.')
@@ -123,7 +129,7 @@ function App() {
     return { width: w, height: h }
   }
 
-  const connectSSE = (id) => {
+  const connectSSE = (id, onAssetsReady) => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
     }
@@ -137,11 +143,19 @@ function App() {
       setJobProgress(data.progress)
       setJobMessage(data.message)
 
-      if (data.status === 'completed' || data.status === 'failed') {
+      if (data.status === 'assets_ready') {
+        es.close()
+        eventSourceRef.current = null
+        setIsGenerating(false)
+        if (onAssetsReady) onAssetsReady()
+      } else if (data.status === 'completed' || data.status === 'failed') {
         es.close()
         eventSourceRef.current = null
         if (data.status === 'failed') {
           setError(data.message)
+        }
+        if (data.status === 'completed') {
+          setWorkflowStep(4) // completed
         }
         setIsGenerating(false)
       }
@@ -151,6 +165,18 @@ function App() {
       es.close()
       eventSourceRef.current = null
       pollStatus(id)
+    }
+  }
+
+  const loadReviewAssets = async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/job-assets/${id}`)
+      if (!res.ok) throw new Error('Failed to load assets')
+      const data = await res.json()
+      setReviewAssets(data.assets)
+      setWorkflowStep(2) // move to review step
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -166,11 +192,14 @@ function App() {
     setJobStatus('queued')
     setJobProgress(0)
     setJobMessage('Starting...')
+    setWorkflowStep(1)
+    setAssetsApproved(false)
+    setReviewAssets([])
 
     const togDims = getTogetheraiDimensions()
 
     try {
-      const res = await fetch(`${API_BASE}/generate-video`, {
+      const res = await fetch(`${API_BASE}/generate-assets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -199,7 +228,80 @@ function App() {
 
       const { job_id } = await res.json()
       setJobId(job_id)
-      connectSSE(job_id)
+      connectSSE(job_id, () => loadReviewAssets(job_id))
+    } catch (err) {
+      setError(err.message)
+      setIsGenerating(false)
+      setWorkflowStep(0)
+    }
+  }
+
+  const regenerateImage = async (sceneIndex) => {
+    if (!jobId) return
+    setRegeneratingIndex(sceneIndex)
+    setError('')
+
+    try {
+      const res = await fetch(`${API_BASE}/regenerate-image/${jobId}/${sceneIndex}`, {
+        method: 'POST',
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Regeneration failed')
+      }
+
+      // Refresh the asset list with cache-busting
+      setReviewAssets(prev => prev.map((a, i) =>
+        i === sceneIndex ? { ...a, image_url: `${API_BASE}/scene-image/${jobId}/${sceneIndex}?t=${Date.now()}` } : a
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRegeneratingIndex(null)
+    }
+  }
+
+  const approveAssets = async () => {
+    if (!jobId) return
+    setError('')
+
+    try {
+      const res = await fetch(`${API_BASE}/approve-assets/${jobId}`, {
+        method: 'POST',
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Approval failed')
+      }
+
+      setAssetsApproved(true)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const prepareVideo = async () => {
+    if (!jobId) return
+    setError('')
+    setIsGenerating(true)
+    setJobStatus('queued')
+    setJobProgress(0)
+    setJobMessage('Preparing video...')
+    setWorkflowStep(3)
+
+    try {
+      const res = await fetch(`${API_BASE}/prepare-video/${jobId}`, {
+        method: 'POST',
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to start video preparation')
+      }
+
+      connectSSE(jobId)
     } catch (err) {
       setError(err.message)
       setIsGenerating(false)
@@ -238,11 +340,15 @@ function App() {
       setJobStatus(data.status)
       setJobProgress(data.progress)
       setJobMessage(data.message)
-      if (data.status !== 'completed' && data.status !== 'failed') {
+      if (data.status === 'assets_ready') {
+        setIsGenerating(false)
+        loadReviewAssets(id)
+      } else if (data.status !== 'completed' && data.status !== 'failed') {
         setTimeout(() => pollStatus(id), 2000)
       } else {
         setIsGenerating(false)
         if (data.status === 'failed') setError(data.message)
+        if (data.status === 'completed') setWorkflowStep(4)
       }
     } catch {
       setTimeout(() => pollStatus(id), 3000)
@@ -679,89 +785,217 @@ function App() {
                   Each scene needs a &quot;voiceover&quot; (text for speech) and a &quot;prompt&quot; (text for image generation).
                 </p>
               </div>
-
-              <button
-                className="btn btn-primary btn-block btn-glow"
-                disabled={!sceneInfo.valid || isGenerating}
-                onClick={startGeneration}
-              >
-                {isGenerating ? (
-                  <><span className="spinner"></span> Generating...</>
-                ) : (
-                  <>🚀 Generate Video</>
-                )}
-              </button>
             </div>
 
-            {/* Progress */}
-            {jobStatus && (
-              <div className="card">
-                <div className="card-header">
-                  <h2>📊 Progress</h2>
-                  <span className={`status-badge ${jobStatus}`}>
-                    {jobStatus === 'queued' && '⏳'}
-                    {jobStatus === 'processing' && '⚙️'}
-                    {jobStatus === 'completed' && '✅'}
-                    {jobStatus === 'failed' && '❌'}
-                    {' '}{jobStatus.charAt(0).toUpperCase() + jobStatus.slice(1)}
-                  </span>
-                </div>
+            {/* ─── Workflow Stepper ─── */}
+            <div className="card">
+              <div className="card-header">
+                <h2>🔄 Workflow</h2>
+                <span className="card-badge">Steps</span>
+              </div>
 
-                <div className="progress-bar-wrapper">
-                  <div className={`progress-bar-fill ${jobStatus}`} style={{ width: `${jobProgress}%` }}></div>
+              {/* Step Indicator */}
+              <div className="workflow-stepper">
+                <div className={`workflow-step ${workflowStep >= 1 ? 'active' : ''} ${workflowStep > 1 ? 'completed' : ''}`}>
+                  <div className="step-number">{workflowStep > 1 ? '✓' : '1'}</div>
+                  <div className="step-label">Generate Audio & Images</div>
                 </div>
-
-                <div className="progress-info">
-                  <span className="progress-message">{jobMessage}</span>
-                  <span className={`progress-percent ${jobStatus}`}>{jobProgress}%</span>
+                <div className={`step-connector ${workflowStep > 1 ? 'active' : ''}`}>
+                  <span className="step-arrow">→</span>
                 </div>
+                <div className={`workflow-step ${workflowStep >= 2 ? 'active' : ''} ${workflowStep > 2 ? 'completed' : ''}`}>
+                  <div className="step-number">{workflowStep > 2 ? '✓' : '2'}</div>
+                  <div className="step-label">Review Resources</div>
+                </div>
+                <div className={`step-connector ${workflowStep > 2 ? 'active' : ''}`}>
+                  <span className="step-arrow">→</span>
+                </div>
+                <div className={`workflow-step ${workflowStep >= 3 ? 'active' : ''} ${workflowStep > 3 ? 'completed' : ''}`}>
+                  <div className="step-number">{workflowStep > 3 ? '✓' : '3'}</div>
+                  <div className="step-label">Prepare Video</div>
+                </div>
+              </div>
 
-                {jobStatus === 'completed' && (
-                  <>
-                    <div className="download-area">
-                      <span style={{ fontSize: '2rem' }}>🎉</span>
+              {/* Step 1: Generate Audio & Images */}
+              {workflowStep === 0 && (
+                <div className="workflow-action">
+                  <button
+                    className="btn btn-primary btn-block btn-glow"
+                    disabled={!sceneInfo.valid || isGenerating}
+                    onClick={startGeneration}
+                  >
+                    🎙️🖼️ Generate Audio & Images
+                  </button>
+                  <p className="help-text" style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+                    This will generate voiceover audio and images for all scenes. You can review them before creating the video.
+                  </p>
+                </div>
+              )}
+
+              {/* Step 1 In Progress */}
+              {workflowStep === 1 && (
+                <div className="workflow-action">
+                  <div className="progress-bar-wrapper">
+                    <div className={`progress-bar-fill ${jobStatus}`} style={{ width: `${jobProgress}%` }}></div>
+                  </div>
+                  <div className="progress-info">
+                    <span className="progress-message">{jobMessage}</span>
+                    <span className={`progress-percent ${jobStatus}`}>{jobProgress}%</span>
+                  </div>
+                  {jobStatus === 'failed' && (
+                    <div className="retry-area" style={{ marginTop: '1rem' }}>
+                      <span style={{ fontSize: '1.5rem' }}>🔄</span>
                       <div>
-                        <strong>Video Ready!</strong>
-                        <p className="muted">Your video has been generated successfully.</p>
+                        <strong>Generation Failed</strong>
+                        <p className="muted">Click retry to resume from where it stopped.</p>
                       </div>
-                      <button className="btn btn-success" onClick={downloadVideo}>
-                        ⬇️ Download Video
+                      <button className="btn btn-primary" onClick={retryGeneration} disabled={isGenerating}>
+                        {isGenerating ? <><span className="spinner"></span> Retrying...</> : <>🔄 Retry</>}
                       </button>
                     </div>
+                  )}
+                </div>
+              )}
 
-                    {/* Inline Video Preview */}
-                    <div className="preview-section">
-                      <div className="preview-header">
-                        <h3>🎬 Preview</h3>
-                        <p className="muted">Watch your generated video right here</p>
-                      </div>
-                      <div className="preview-player">
-                        <video
-                          controls
-                          src={`${API_BASE}/download/${jobId}`}
-                          className="video-player"
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
+              {/* Step 2: Review Resources */}
+              {workflowStep === 2 && (
+                <div className="workflow-action">
+                  <div className="review-header">
+                    <h3>📋 Review Generated Resources</h3>
+                    <p className="muted">Check each image below. Click &quot;Regenerate&quot; on any image that doesn&apos;t look right.</p>
+                  </div>
 
-                {jobStatus === 'failed' && (
-                  <div className="retry-area">
-                    <span style={{ fontSize: '1.5rem' }}>🔄</span>
-                    <div>
-                      <strong>Generation Failed</strong>
-                      <p className="muted">
-                        Already generated assets will be reused. Click retry to resume from where it stopped.
-                      </p>
-                    </div>
-                    <button className="btn btn-primary" onClick={retryGeneration} disabled={isGenerating}>
-                      {isGenerating ? <><span className="spinner"></span> Retrying...</> : <>🔄 Retry</>}
+                  <div className="review-grid">
+                    {reviewAssets.map((asset, i) => (
+                      <div key={i} className="review-card">
+                        <div className="review-card-header">
+                          <span className="review-scene-label">Scene {i + 1}</span>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            disabled={regeneratingIndex === i}
+                            onClick={() => regenerateImage(i)}
+                          >
+                            {regeneratingIndex === i ? (
+                              <><span className="spinner"></span> Regenerating...</>
+                            ) : (
+                              <>🔄 Regenerate</>
+                            )}
+                          </button>
+                        </div>
+                        <div className="review-image-wrapper">
+                          {asset.has_image ? (
+                            <img src={asset.image_url} alt={`Scene ${i + 1}`} className="review-image" />
+                          ) : (
+                            <div className="review-image-placeholder">No image generated</div>
+                          )}
+                        </div>
+                        <p className="review-prompt" title={asset.prompt}>
+                          {asset.prompt.length > 100 ? asset.prompt.substring(0, 100) + '...' : asset.prompt}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="review-actions">
+                    <button
+                      className="btn btn-success btn-block btn-glow"
+                      onClick={approveAssets}
+                      disabled={assetsApproved}
+                    >
+                      {assetsApproved ? '✅ Approved' : '✅ Approve & Continue'}
                     </button>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {assetsApproved && (
+                    <div className="next-step-hint">
+                      <span className="next-step-arrow">↓</span>
+                      <button
+                        className="btn btn-primary btn-block btn-glow"
+                        onClick={prepareVideo}
+                        disabled={isGenerating}
+                      >
+                        {isGenerating ? (
+                          <><span className="spinner"></span> Preparing...</>
+                        ) : (
+                          <>🎬 Prepare Video</>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 3: Video Preparation In Progress */}
+              {workflowStep === 3 && (
+                <div className="workflow-action">
+                  <div className="progress-bar-wrapper">
+                    <div className={`progress-bar-fill ${jobStatus}`} style={{ width: `${jobProgress}%` }}></div>
+                  </div>
+                  <div className="progress-info">
+                    <span className="progress-message">{jobMessage}</span>
+                    <span className={`progress-percent ${jobStatus}`}>{jobProgress}%</span>
+                  </div>
+                  {jobStatus === 'failed' && (
+                    <div className="retry-area" style={{ marginTop: '1rem' }}>
+                      <span style={{ fontSize: '1.5rem' }}>🔄</span>
+                      <div>
+                        <strong>Video Preparation Failed</strong>
+                        <p className="muted">Click retry to try assembling the video again.</p>
+                      </div>
+                      <button className="btn btn-primary" onClick={prepareVideo} disabled={isGenerating}>
+                        {isGenerating ? <><span className="spinner"></span> Retrying...</> : <>🔄 Retry</>}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Step 4: Completed */}
+              {workflowStep === 4 && jobStatus === 'completed' && (
+                <div className="workflow-action">
+                  <div className="download-area">
+                    <span style={{ fontSize: '2rem' }}>🎉</span>
+                    <div>
+                      <strong>Video Ready!</strong>
+                      <p className="muted">Your video has been generated successfully.</p>
+                    </div>
+                    <button className="btn btn-success" onClick={downloadVideo}>
+                      ⬇️ Download Video
+                    </button>
+                  </div>
+
+                  <div className="preview-section">
+                    <div className="preview-header">
+                      <h3>🎬 Preview</h3>
+                      <p className="muted">Watch your generated video right here</p>
+                    </div>
+                    <div className="preview-player">
+                      <video
+                        controls
+                        src={`${API_BASE}/download/${jobId}`}
+                        className="video-player"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    className="btn btn-secondary btn-block"
+                    style={{ marginTop: '1rem' }}
+                    onClick={() => {
+                      setWorkflowStep(0)
+                      setJobId(null)
+                      setJobStatus(null)
+                      setJobProgress(0)
+                      setJobMessage('')
+                      setReviewAssets([])
+                      setAssetsApproved(false)
+                    }}
+                  >
+                    🔄 Start New Video
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
