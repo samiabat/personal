@@ -65,12 +65,17 @@ def _create_ken_burns_clip(image_path: str, duration: float, target_size: tuple,
 
 
 def assemble_final_video(total_scenes: int, asset_folder: str, output_filename: str,
-                         resolution: str = "1080p", enable_ken_burns: bool = False,
+                         resolution: str = "1080p", orientation: str = "landscape",
+                         enable_ken_burns: bool = False,
                          enable_zoom: bool = False, enable_shake: bool = False):
     """Takes all generated assets, stitches them, and renders the MP4.
 
     ``enable_ken_burns`` is kept for backward-compatibility and treated as
     enabling **both** zoom and shake when the individual flags are not set.
+
+    ``orientation`` can be ``"landscape"`` (default) or ``"portrait"``.
+    Portrait swaps width and height so the output is vertical (e.g. for
+    YouTube Shorts, Instagram Reels, or TikTok).
     """
     # Legacy compat: if old flag is True and new flags are both False, enable both
     if enable_ken_burns and not enable_zoom and not enable_shake:
@@ -85,6 +90,9 @@ def assemble_final_video(total_scenes: int, asset_folder: str, output_filename: 
         "4K": (3840, 2160),
     }
     target_size = res_map.get(resolution, (1920, 1080))
+
+    if orientation == "portrait":
+        target_size = (target_size[1], target_size[0])
 
     video_clips = []
     for index in range(total_scenes):
