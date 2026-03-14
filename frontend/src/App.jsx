@@ -899,10 +899,7 @@ function App() {
                   <div className="review-actions">
                     <button
                       className="btn btn-success btn-block btn-glow"
-                      onClick={async () => {
-                        await approveAssets()
-                        setAssetsApproved(true)
-                      }}
+                      onClick={approveAssets}
                       disabled={assetsApproved}
                     >
                       {assetsApproved ? '✅ Approved' : '✅ Approve & Continue'}

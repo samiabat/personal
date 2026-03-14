@@ -335,7 +335,7 @@ async def get_job_assets(job_id: str):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = jobs[job_id]
-    if job["status"] not in ("assets_ready", "approved"):
+    if job["status"] not in ("assets_ready", "approved", "completed"):
         raise HTTPException(status_code=400, detail=f"Assets not ready (status: {job['status']})")
 
     request_data = job["request"]
@@ -387,7 +387,7 @@ async def regenerate_image(job_id: str, scene_index: int):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = jobs[job_id]
-    if job["status"] not in ("assets_ready", "approved"):
+    if job["status"] != "assets_ready":
         raise HTTPException(status_code=400, detail="Assets not ready for regeneration")
 
     request_data = job["request"]
@@ -402,7 +402,7 @@ async def regenerate_image(job_id: str, scene_index: int):
         os.remove(image_path)
 
     try:
-        success = _generate_image_for_provider(
+        _generate_image_for_provider(
             request_data.get("image_provider", "gemini"),
             scenes[scene_index]["prompt"],
             image_path,
@@ -413,7 +413,7 @@ async def regenerate_image(job_id: str, scene_index: int):
             togetherai_width=request_data.get("togetherai_width", 1024),
             togetherai_height=request_data.get("togetherai_height", 576),
         )
-        if success:
+        if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
             return {"success": True, "message": f"Image for scene {scene_index + 1} regenerated"}
         raise HTTPException(status_code=500, detail="Image regeneration failed")
     except HTTPException:
