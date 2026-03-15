@@ -92,6 +92,20 @@ def find_nearest_audio_peak(audio_path: str, target_time: float,
 
 
 # ---------------------------------------------------------------------------
+# Easing helpers
+# ---------------------------------------------------------------------------
+
+def _smoothstep(t: float) -> float:
+    """Hermite smooth-step interpolation: 3t² − 2t³.
+
+    Maps *t* ∈ [0, 1] → [0, 1] with zero first-derivative at both ends,
+    giving a perceptually "cinematic" ease-in / ease-out curve.
+    """
+    t = np.clip(t, 0.0, 1.0)
+    return float(3.0 * t ** 2 - 2.0 * t ** 3)
+
+
+# ---------------------------------------------------------------------------
 # Effect helpers – each returns a MoviePy clip
 # ---------------------------------------------------------------------------
 
@@ -123,19 +137,64 @@ def _create_static_clip(image_path: str, duration: float, target_size: tuple,
 
 
 def _create_zoom_clip(image_path: str, duration: float, target_size: tuple,
-                       direction: str = "in", fps: int = 24) -> VideoClip:
-    """Continuous cinematic zoom (``"in"`` or ``"out"``)."""
+                       direction: str = "in", fps: int = 24,
+                       hold_duration: float | None = None,
+                       ease_duration: float = 0.5,
+                       zoom_target: float = 1.15) -> VideoClip:
+    """Cinematic state-based zoom with Ease-In → Hold → Ease-Out phases.
+
+    Parameters
+    ----------
+    direction : str
+        ``"in"``  → scale ramps *up* to *zoom_target* then back to 1.0.
+        ``"out"`` → scale ramps *down* to 1.0 then back to *zoom_target*.
+    hold_duration : float | None
+        How long to hold the peak zoom.  When ``None`` the hold fills
+        whatever time remains after the two ease phases.
+    ease_duration : float
+        Duration (seconds) of each ease phase (default 0.5 s).
+    zoom_target : float
+        Peak zoom scale (default 1.15).
+    """
     img_arr, new_w, new_h = _prepare_image(image_path, target_size, 1.20)
     w, h = target_size
 
-    zoom_start = 1.0 if direction == "in" else 1.12
-    zoom_end = 1.12 if direction == "in" else 1.0
+    # --- phase durations (clamp so they never exceed total duration) ---------
+    ease_in_dur = min(ease_duration, duration / 3.0)
+    ease_out_dur = min(ease_duration, duration / 3.0)
+
+    if hold_duration is not None:
+        hold_dur = hold_duration
+        # If explicit hold + eases exceed the segment, shrink hold first
+        total = ease_in_dur + hold_dur + ease_out_dur
+        if total > duration:
+            hold_dur = max(0.0, duration - ease_in_dur - ease_out_dur)
+    else:
+        # Fill remaining time with the hold
+        hold_dur = max(0.0, duration - ease_in_dur - ease_out_dur)
+
+    # --- zoom range ----------------------------------------------------------
+    if direction == "in":
+        zoom_base = 1.0
+        zoom_peak = zoom_target
+    else:
+        zoom_base = zoom_target
+        zoom_peak = 1.0
 
     def make_frame(t):
-        progress = t / max(duration, 0.001)
-        progress = 0.5 - 0.5 * np.cos(progress * np.pi)
+        if t < ease_in_dur:
+            # Phase 1 – Ease-In
+            progress = _smoothstep(t / max(ease_in_dur, 1e-6))
+            zoom = zoom_base + (zoom_peak - zoom_base) * progress
+        elif t < ease_in_dur + hold_dur:
+            # Phase 2 – Hold
+            zoom = zoom_peak
+        else:
+            # Phase 3 – Ease-Out
+            ease_out_t = t - ease_in_dur - hold_dur
+            progress = _smoothstep(ease_out_t / max(ease_out_dur, 1e-6))
+            zoom = zoom_peak + (zoom_base - zoom_peak) * progress
 
-        zoom = zoom_start + (zoom_end - zoom_start) * progress
         crop_w = int(w / zoom)
         crop_h = int(h / zoom)
 
@@ -245,8 +304,10 @@ def assemble_v2_video(image_paths: list[str], audio_path: str,
     audio_path : str
         Path to the full voiceover WAV.
     visual_beats : list[dict]
-        Each dict has ``trigger_word``, ``effect``, ``image_index`` and an
-        optional ``color_grade``.
+        Each dict has ``trigger_word``, ``effect``, ``image_index`` and
+        optional ``color_grade`` and ``hold_duration`` (seconds).  When
+        ``hold_duration`` is omitted it defaults to
+        ``(next_beat_time − current_beat_time) / 2``.
     word_timestamps : list[dict]
         Word-level timestamps from Whisper (``word``, ``start``, ``end``).
     output_path : str
@@ -268,6 +329,7 @@ def assemble_v2_video(image_paths: list[str], audio_path: str,
             "effect": beat["effect"],
             "image_index": beat["image_index"],
             "color_grade": beat.get("color_grade"),
+            "hold_duration": beat.get("hold_duration"),
         })
 
     beat_events.sort(key=lambda x: x["time"])
@@ -297,9 +359,17 @@ def assemble_v2_video(image_paths: list[str], audio_path: str,
         effect = ev["effect"]
 
         if effect == "zoom_in_slow":
-            clip = _create_zoom_clip(img_path, seg_duration, target_size, "in", fps)
+            hold = ev["hold_duration"]
+            if hold is None:
+                hold = seg_duration / 2.0
+            clip = _create_zoom_clip(img_path, seg_duration, target_size, "in",
+                                      fps, hold_duration=hold)
         elif effect == "zoom_out_slow":
-            clip = _create_zoom_clip(img_path, seg_duration, target_size, "out", fps)
+            hold = ev["hold_duration"]
+            if hold is None:
+                hold = seg_duration / 2.0
+            clip = _create_zoom_clip(img_path, seg_duration, target_size, "out",
+                                      fps, hold_duration=hold)
         elif effect == "audio_reactive_shake":
             peak_offset = max(0.0, ev.get("peak_time", start) - start)
             clip = _create_shake_clip(img_path, seg_duration, target_size,
