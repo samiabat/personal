@@ -625,7 +625,6 @@ async def get_scene_audio(job_id: str, scene_index: int):
         audio_path = f"{JOBS_DIR}/{job_id}/v2_scene_{scene_index}_audio.wav"
     else:
         audio_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_audio.wav"
-    audio_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_audio.wav"
     if not os.path.exists(audio_path):
         raise HTTPException(status_code=404, detail="Audio not found")
     return FileResponse(audio_path, media_type="audio/wav")

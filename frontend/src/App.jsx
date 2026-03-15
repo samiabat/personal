@@ -1009,8 +1009,18 @@ function App() {
                   color: darkMode ? '#a5b4fc' : '#4338ca',
                 }}>
                   <strong>V2 Grouped Scenes:</strong> One voiceover maps to multiple images via visual beats.
-                  Effects: <code>zoom_in_slow</code>, <code>zoom_out_slow</code>, <code>audio_reactive_shake</code>, <code>hard_cut</code>, <code>pop_scale</code>.
-                  Optional <code>color_grade</code>: <code>dark</code>, <code>warm</code>, <code>cool</code>, <code>high_contrast</code>.
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Effects:</strong>{' '}
+                    <code>zoom_in_slow</code> (gradual zoom in),{' '}
+                    <code>zoom_out_slow</code> (gradual zoom out),{' '}
+                    <code>audio_reactive_shake</code> (jitter at audio peak),{' '}
+                    <code>hard_cut</code> (instant switch to image),{' '}
+                    <code>pop_scale</code> (quick scale burst).
+                  </div>
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Color grades</strong> (optional):{' '}
+                    <code>dark</code>, <code>warm</code>, <code>cool</code>, <code>high_contrast</code>.
+                  </div>
                 </div>
               )}
 
