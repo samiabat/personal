@@ -272,8 +272,19 @@ function App() {
         throw new Error(data.detail || 'Regeneration failed')
       }
 
-      // Refresh asset list
-      await loadReviewAssets(jobId)
+      // Update the specific image URL with cache-busting to force reload
+      setReviewAssets(prev => prev.map((scene, sIdx) =>
+        sIdx === sceneIndex
+          ? {
+              ...scene,
+              images: scene.images.map((img, pIdx) =>
+                pIdx === promptIndex
+                  ? { ...img, image_url: `${API_BASE}/v2-scene-image/${jobId}/${sceneIndex}/${promptIndex}?t=${Date.now()}` }
+                  : img
+              ),
+            }
+          : scene
+      ))
     } catch (err) {
       setError(err.message)
     } finally {

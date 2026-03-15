@@ -688,7 +688,10 @@ async def get_scene_image(job_id: str, scene_index: int):
     image_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_image.jpg"
     if not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(image_path, media_type="image/jpeg")
+    return FileResponse(
+        image_path, media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 
 @app.get("/api/v2-scene-image/{job_id}/{scene_index}/{prompt_index}")
@@ -699,7 +702,10 @@ async def get_v2_scene_image(job_id: str, scene_index: int, prompt_index: int):
     image_path = f"{JOBS_DIR}/{job_id}/v2_scene_{scene_index}_image_{prompt_index}.jpg"
     if not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(image_path, media_type="image/jpeg")
+    return FileResponse(
+        image_path, media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 
 @app.get("/api/scene-audio/{job_id}/{scene_index}")
