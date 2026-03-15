@@ -43,7 +43,7 @@ function App() {
 
   // Generation settings
   const [scenesText, setScenesText] = useState('')
-  const [videoVersion, setVideoVersion] = useState('v1') // 'v1' or 'v2'
+  const [videoVersion, setVideoVersion] = useState('v1') // 'v1', 'v2', or 'v3'
   const [speechProvider, setSpeechProvider] = useState('google')
   const [speechModel, setSpeechModel] = useState('gemini-2.5-pro-preview-tts')
   const [customSpeechModel, setCustomSpeechModel] = useState('')
@@ -79,6 +79,12 @@ function App() {
   const [reviewAssets, setReviewAssets] = useState([]) // [{scene_index, prompt, image_url, ...}]
   const [regeneratingIndex, setRegeneratingIndex] = useState(null) // which scene is being regenerated
   const [assetsApproved, setAssetsApproved] = useState(false)
+
+  // V3 Director Review
+  const [directorReviewBeats, setDirectorReviewBeats] = useState([]) // zoom-related beats
+  const [directorReviewIndex, setDirectorReviewIndex] = useState(0)
+  const [directorFocus, setDirectorFocus] = useState(null) // {x, y} or null
+  const [directorReviewDone, setDirectorReviewDone] = useState(false)
 
   // Test panel
   const [testAudioText, setTestAudioText] = useState('Hello! This is a test of the text to speech system.')
@@ -164,7 +170,7 @@ function App() {
       const parsed = JSON.parse(scenesText)
       if (!Array.isArray(parsed)) return { valid: false, count: 0, error: 'Must be a JSON array' }
 
-      if (videoVersion === 'v2') {
+      if (videoVersion === 'v2' || videoVersion === 'v3') {
         for (const s of parsed) {
           if (!s.voiceover) return { valid: false, count: parsed.length, error: 'Each V2 scene needs "voiceover"' }
           if (!Array.isArray(s.prompts) || s.prompts.length === 0) return { valid: false, count: parsed.length, error: 'Each V2 scene needs a "prompts" array with at least one prompt' }
@@ -290,6 +296,10 @@ function App() {
     setWorkflowStep(1)
     setAssetsApproved(false)
     setReviewAssets([])
+    setDirectorReviewBeats([])
+    setDirectorReviewIndex(0)
+    setDirectorFocus(null)
+    setDirectorReviewDone(false)
 
     const togDims = getTogetheraiDimensions()
     const parsedScenes = JSON.parse(scenesText)
@@ -315,7 +325,7 @@ function App() {
       together_api_key: togetherApiKey,
     }
 
-    if (videoVersion === 'v2') {
+    if (videoVersion === 'v2' || videoVersion === 'v3') {
       body.v2_scenes = parsedScenes
     } else {
       body.scenes = parsedScenes
@@ -412,6 +422,107 @@ function App() {
     } catch (err) {
       setError(err.message)
       setIsGenerating(false)
+    }
+  }
+
+  // --- V3 Director Review helpers ---
+  const ZOOM_EFFECTS = ['zoom_in_slow', 'zoom_out_slow', 'pop_scale']
+
+  const initDirectorReview = () => {
+    // Collect all zoom-related beats across all scenes
+    const beats = []
+    for (let sIdx = 0; sIdx < reviewAssets.length; sIdx++) {
+      const scene = reviewAssets[sIdx]
+      const vBeats = scene.visual_beats || []
+      for (let bIdx = 0; bIdx < vBeats.length; bIdx++) {
+        const b = vBeats[bIdx]
+        if (ZOOM_EFFECTS.includes(b.effect)) {
+          beats.push({
+            sceneIndex: sIdx,
+            beatIndex: bIdx,
+            triggerWord: b.trigger_word,
+            effect: b.effect,
+            imageIndex: b.image_index,
+            imageUrl: (scene.images || [])[b.image_index]?.image_url || '',
+          })
+        }
+      }
+    }
+    if (beats.length === 0) {
+      // No zoom beats — skip director review entirely
+      setDirectorReviewDone(true)
+      return
+    }
+    setDirectorReviewBeats(beats)
+    setDirectorReviewIndex(0)
+    setDirectorFocus(null)
+    setDirectorReviewDone(false)
+  }
+
+  const handleDirectorImageClick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width
+    const y = (e.clientY - rect.top) / rect.height
+    setDirectorFocus({ x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) })
+  }
+
+  const acceptFocusPoint = async () => {
+    if (!jobId || directorReviewIndex >= directorReviewBeats.length) return
+    const beat = directorReviewBeats[directorReviewIndex]
+    const fx = directorFocus ? directorFocus.x : 0.5
+    const fy = directorFocus ? directorFocus.y : 0.5
+
+    try {
+      const res = await fetch(`${API_BASE}/update-focus-point/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scene_index: beat.sceneIndex,
+          beat_index: beat.beatIndex,
+          focus_x: fx,
+          focus_y: fy,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Failed to save focus point')
+      }
+    } catch (err) {
+      setError(err.message)
+      return
+    }
+
+    advanceDirectorReview()
+  }
+
+  const skipFocusPoint = async () => {
+    // Use centre (0.5, 0.5)
+    if (!jobId || directorReviewIndex >= directorReviewBeats.length) return
+    const beat = directorReviewBeats[directorReviewIndex]
+
+    try {
+      await fetch(`${API_BASE}/update-focus-point/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scene_index: beat.sceneIndex,
+          beat_index: beat.beatIndex,
+          focus_x: 0.5,
+          focus_y: 0.5,
+        }),
+      })
+    } catch { /* centre is the default anyway */ }
+
+    advanceDirectorReview()
+  }
+
+  const advanceDirectorReview = () => {
+    const next = directorReviewIndex + 1
+    if (next >= directorReviewBeats.length) {
+      setDirectorReviewDone(true)
+    } else {
+      setDirectorReviewIndex(next)
+      setDirectorFocus(null)
     }
   }
 
@@ -979,6 +1090,13 @@ function App() {
                     >
                       V2
                     </button>
+                    <button
+                      className={`btn btn-sm ${videoVersion === 'v3' ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => { setVideoVersion('v3'); setScenesText('') }}
+                      style={{ borderRadius: '0.4rem', minWidth: '3rem' }}
+                    >
+                      V3
+                    </button>
                   </div>
                   {videoVersion === 'v1' && (
                     <>
@@ -990,15 +1108,15 @@ function App() {
                       </button>
                     </>
                   )}
-                  {videoVersion === 'v2' && (
+                  {(videoVersion === 'v2' || videoVersion === 'v3') && (
                     <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_V2_SCENES_EXAMPLE)}>
-                      Load V2 Example
+                      Load {videoVersion.toUpperCase()} Example
                     </button>
                   )}
                 </div>
               </div>
 
-              {videoVersion === 'v2' && (
+              {(videoVersion === 'v2' || videoVersion === 'v3') && (
                 <div className="v2-info-banner" style={{
                   background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.08))',
                   border: '1px solid rgba(99,102,241,0.25)',
@@ -1008,7 +1126,7 @@ function App() {
                   fontSize: '0.85rem',
                   color: darkMode ? '#a5b4fc' : '#4338ca',
                 }}>
-                  <strong>V2 Grouped Scenes:</strong> One voiceover maps to multiple images via visual beats.
+                  <strong>{videoVersion === 'v3' ? 'V3 Director Mode' : 'V2 Grouped Scenes'}:</strong> One voiceover maps to multiple images via visual beats.
                   <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
                     <strong>Effects:</strong>{' '}
                     <code>zoom_in_slow</code> (gradual zoom in),{' '}
@@ -1021,6 +1139,11 @@ function App() {
                     <strong>Color grades</strong> (optional):{' '}
                     <code>dark</code>, <code>warm</code>, <code>cool</code>, <code>high_contrast</code>.
                   </div>
+                  {videoVersion === 'v3' && (
+                    <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5', borderTop: '1px solid rgba(99,102,241,0.2)', paddingTop: '0.4rem' }}>
+                      🎯 <strong>Director Review:</strong> After approving assets, you can click on images to set a custom focus point for zoom &amp; pop effects.
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1029,19 +1152,19 @@ function App() {
                   <label style={{ margin: 0 }}>Paste your scenes JSON array below</label>
                   {scenesText && (
                     <span className={`scene-count ${sceneInfo.valid ? 'valid' : 'invalid'}`}>
-                      {sceneInfo.valid ? `✓ ${sceneInfo.count} ${videoVersion === 'v2' ? 'grouped scene' : 'scene'}${sceneInfo.count !== 1 ? 's' : ''}` : `✗ ${sceneInfo.error}`}
+                      {sceneInfo.valid ? `✓ ${sceneInfo.count} ${(videoVersion === 'v2' || videoVersion === 'v3') ? 'grouped scene' : 'scene'}${sceneInfo.count !== 1 ? 's' : ''}` : `✗ ${sceneInfo.error}`}
                     </span>
                   )}
                 </div>
                 <textarea
                   className="scene-editor"
-                  placeholder={videoVersion === 'v2' ? DEFAULT_V2_SCENES_EXAMPLE : DEFAULT_SCENES_EXAMPLE}
+                  placeholder={(videoVersion === 'v2' || videoVersion === 'v3') ? DEFAULT_V2_SCENES_EXAMPLE : DEFAULT_SCENES_EXAMPLE}
                   value={scenesText}
                   onChange={e => setScenesText(e.target.value)}
                 />
                 <p className="help-text">
-                  {videoVersion === 'v2'
-                    ? 'Each V2 scene needs "voiceover", "prompts" (array), and "visual_beats" (array with trigger_word, effect, image_index).'
+                  {(videoVersion === 'v2' || videoVersion === 'v3')
+                    ? `Each ${videoVersion.toUpperCase()} scene needs "voiceover", "prompts" (array), and "visual_beats" (array with trigger_word, effect, image_index).`
                     : 'Each scene needs a "voiceover" (text for speech) and a "prompt" (text for image generation).'}
                 </p>
               </div>
@@ -1125,7 +1248,7 @@ function App() {
                     <p className="muted">Check each image below. Click &quot;Regenerate&quot; on any image that doesn&apos;t look right.</p>
                   </div>
 
-                  {videoVersion === 'v2' ? (
+                  {(videoVersion === 'v2' || videoVersion === 'v3') ? (
                     /* V2 Review: grouped scenes with multiple images */
                     <div className="review-grid">
                       {reviewAssets.map((scene, sIdx) => (
@@ -1212,14 +1335,100 @@ function App() {
                   <div className="review-actions">
                     <button
                       className="btn btn-success btn-block btn-glow"
-                      onClick={approveAssets}
+                      onClick={() => { approveAssets(); if (videoVersion === 'v3') initDirectorReview(); }}
                       disabled={assetsApproved}
                     >
                       {assetsApproved ? '✅ Approved' : '✅ Approve & Continue'}
                     </button>
                   </div>
 
-                  {assetsApproved && (
+                  {/* V3 Director Review UI */}
+                  {assetsApproved && videoVersion === 'v3' && !directorReviewDone && directorReviewBeats.length > 0 && (
+                    <div className="director-review" style={{
+                      marginTop: '1.5rem',
+                      background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(239,68,68,0.06))',
+                      border: '1px solid rgba(245,158,11,0.3)',
+                      borderRadius: '0.75rem',
+                      padding: '1.25rem',
+                    }}>
+                      <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.1rem' }}>
+                        🎯 Action Required: Select Zoom Focus Point for &quot;{directorReviewBeats[directorReviewIndex]?.triggerWord}&quot;
+                      </h3>
+                      <p className="muted" style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem' }}>
+                        Beat {directorReviewIndex + 1} of {directorReviewBeats.length} &middot; Effect: <code>{directorReviewBeats[directorReviewIndex]?.effect}</code>
+                      </p>
+
+                      <div
+                        style={{
+                          position: 'relative',
+                          cursor: 'crosshair',
+                          borderRadius: '0.5rem',
+                          overflow: 'hidden',
+                          border: '2px solid rgba(245,158,11,0.4)',
+                          display: 'inline-block',
+                          maxWidth: '100%',
+                        }}
+                        onClick={handleDirectorImageClick}
+                      >
+                        <img
+                          src={directorReviewBeats[directorReviewIndex]?.imageUrl}
+                          alt="Focus target"
+                          style={{ display: 'block', maxWidth: '100%', maxHeight: '450px', objectFit: 'contain' }}
+                          draggable={false}
+                        />
+                        {directorFocus && (
+                          <div style={{
+                            position: 'absolute',
+                            left: `${directorFocus.x * 100}%`,
+                            top: `${directorFocus.y * 100}%`,
+                            transform: 'translate(-50%, -50%)',
+                            pointerEvents: 'none',
+                          }}>
+                            {/* Red target icon */}
+                            <div style={{
+                              width: '28px', height: '28px',
+                              border: '3px solid #ef4444',
+                              borderRadius: '50%',
+                              position: 'relative',
+                              boxShadow: '0 0 0 2px rgba(0,0,0,0.3), inset 0 0 0 2px rgba(0,0,0,0.15)',
+                            }}>
+                              <div style={{
+                                position: 'absolute', top: '50%', left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                width: '6px', height: '6px',
+                                background: '#ef4444',
+                                borderRadius: '50%',
+                              }} />
+                              {/* Crosshair lines */}
+                              <div style={{ position: 'absolute', top: '-8px', left: '50%', transform: 'translateX(-50%)', width: '2px', height: '8px', background: '#ef4444' }} />
+                              <div style={{ position: 'absolute', bottom: '-8px', left: '50%', transform: 'translateX(-50%)', width: '2px', height: '8px', background: '#ef4444' }} />
+                              <div style={{ position: 'absolute', left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '8px', height: '2px', background: '#ef4444' }} />
+                              <div style={{ position: 'absolute', right: '-8px', top: '50%', transform: 'translateY(-50%)', width: '8px', height: '2px', background: '#ef4444' }} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {directorFocus && (
+                        <p style={{ fontSize: '0.8rem', marginTop: '0.5rem', opacity: 0.7 }}>
+                          Focus: ({directorFocus.x.toFixed(3)}, {directorFocus.y.toFixed(3)}) — click again to reposition
+                        </p>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+                        <button className="btn btn-primary" onClick={acceptFocusPoint}>
+                          ✅ Accept
+                        </button>
+                        <button className="btn btn-secondary" onClick={skipFocusPoint}>
+                          ⏭️ Skip (Use Center)
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* For V2: straight to Prepare Video after approval */}
+                  {/* For V3: show Prepare Video only after director review is complete */}
+                  {assetsApproved && (videoVersion !== 'v3' || directorReviewDone) && (
                     <div className="next-step-hint">
                       <span className="next-step-arrow">↓</span>
                       <button
@@ -1302,6 +1511,10 @@ function App() {
                       setJobMessage('')
                       setReviewAssets([])
                       setAssetsApproved(false)
+                      setDirectorReviewBeats([])
+                      setDirectorReviewIndex(0)
+                      setDirectorFocus(null)
+                      setDirectorReviewDone(false)
                     }}
                   >
                     🔄 Start New Video
