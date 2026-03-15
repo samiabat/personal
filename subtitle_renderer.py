@@ -231,6 +231,7 @@ def _render_typewriter_frame(words: list[dict], current_time: float,
 
 FADE_IN_DUR = 0.25   # seconds for subtitle fade-in
 FADE_OUT_DUR = 0.20  # seconds for subtitle fade-out
+MAX_FADE_RATIO = 0.3  # fades are capped at 30% of the phrase duration
 
 
 def _compute_phrase_opacity(t: float, phrase_start: float, phrase_end: float) -> float:
@@ -243,12 +244,12 @@ def _compute_phrase_opacity(t: float, phrase_start: float, phrase_end: float) ->
     remaining = phrase_end - t
 
     # Fade in
-    fade_in = min(FADE_IN_DUR, phrase_dur * 0.3)
+    fade_in = min(FADE_IN_DUR, phrase_dur * MAX_FADE_RATIO)
     if elapsed < fade_in and fade_in > 0:
         return float(np.clip(elapsed / fade_in, 0.0, 1.0))
 
     # Fade out
-    fade_out = min(FADE_OUT_DUR, phrase_dur * 0.3)
+    fade_out = min(FADE_OUT_DUR, phrase_dur * MAX_FADE_RATIO)
     if remaining < fade_out and fade_out > 0:
         return float(np.clip(remaining / fade_out, 0.0, 1.0))
 
