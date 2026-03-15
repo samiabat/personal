@@ -26,6 +26,14 @@ from v2_editor import (
 # Focus-aware effect helpers
 # ---------------------------------------------------------------------------
 
+def _focus_center(focus_x: float, focus_y: float, new_w: int, new_h: int) -> tuple[int, int]:
+    """Convert normalised focus floats (0–1) to pixel coordinates."""
+    return (
+        int(np.clip(focus_x, 0.0, 1.0) * new_w),
+        int(np.clip(focus_y, 0.0, 1.0) * new_h),
+    )
+
+
 def _create_zoom_clip_focused(image_path: str, duration: float,
                                target_size: tuple, direction: str = "in",
                                fps: int = 24, hold_duration: float | None = None,
@@ -61,8 +69,7 @@ def _create_zoom_clip_focused(image_path: str, duration: float,
         zoom_peak = 1.0
 
     # Focus centre in pixel space
-    fcx = int(np.clip(focus_x, 0.0, 1.0) * new_w)
-    fcy = int(np.clip(focus_y, 0.0, 1.0) * new_h)
+    fcx, fcy = _focus_center(focus_x, focus_y, new_w, new_h)
 
     def make_frame(t):
         if t < ease_in_dur:
@@ -96,8 +103,7 @@ def _create_pop_scale_clip_focused(image_path: str, duration: float,
     w, h = target_size
     pop_dur = min(0.3, duration * 0.5)
 
-    fcx = int(np.clip(focus_x, 0.0, 1.0) * new_w)
-    fcy = int(np.clip(focus_y, 0.0, 1.0) * new_h)
+    fcx, fcy = _focus_center(focus_x, focus_y, new_w, new_h)
 
     def make_frame(t):
         if t < pop_dur:

@@ -389,6 +389,16 @@ def run_v2_video_generation(job_id: str, request: VideoRequest):
         run_v2_video_assembly(job_id, request)
 
 
+def run_v3_video_generation(job_id: str, request: VideoRequest):
+    """Full V3 pipeline: V2 asset generation + V3 focus-aware assembly."""
+    run_v2_asset_generation(job_id, request)
+    job = jobs[job_id]
+    if job["status"] == "assets_ready":
+        job["status"] = "processing"
+        job["progress"] = 0
+        run_v3_video_assembly(job_id, request)
+
+
 def run_v3_video_assembly(job_id: str, request: VideoRequest):
     """Background task: assemble V3 video using word-level timestamps + focus-aware effects."""
     job = jobs[job_id]
@@ -560,7 +570,7 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
     if request.version == "v2":
         background_tasks.add_task(run_v2_video_generation, job_id, request)
     elif request.version == "v3":
-        background_tasks.add_task(run_v2_video_generation, job_id, request)
+        background_tasks.add_task(run_v3_video_generation, job_id, request)
     else:
         background_tasks.add_task(run_video_generation, job_id, request)
     return {"job_id": job_id}
@@ -584,7 +594,9 @@ async def retry_job(job_id: str, background_tasks: BackgroundTasks):
     job["message"] = "Retrying job..."
     job["output_path"] = None
 
-    if request.version in ("v2", "v3"):
+    if request.version == "v3":
+        background_tasks.add_task(run_v3_video_generation, job_id, request)
+    elif request.version == "v2":
         background_tasks.add_task(run_v2_video_generation, job_id, request)
     else:
         background_tasks.add_task(run_video_generation, job_id, request)

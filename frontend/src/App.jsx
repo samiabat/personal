@@ -511,7 +511,7 @@ function App() {
           focus_y: 0.5,
         }),
       })
-    } catch { /* centre is the default anyway */ }
+    } catch (err) { console.error('Skip focus point:', err) }
 
     advanceDirectorReview()
   }
