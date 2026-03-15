@@ -14,6 +14,22 @@ const DEFAULT_SCENES_EXAMPLE = `[
   }
 ]`
 
+const DEFAULT_V2_SCENES_EXAMPLE = `[
+  {
+    "voiceover": "Imagine your family's life depends on a single choice. A choice that could change everything.",
+    "prompts": [
+      "Vibrant Ghibli style, old man on a dirt path, sunny hills",
+      "Vibrant Ghibli style, close up of a golden coin in a hand"
+    ],
+    "visual_beats": [
+      { "trigger_word": "Imagine", "effect": "zoom_in_slow", "image_index": 0 },
+      { "trigger_word": "single choice", "effect": "audio_reactive_shake", "image_index": 0 },
+      { "trigger_word": "change everything", "effect": "hard_cut", "image_index": 1 },
+      { "trigger_word": "everything", "effect": "pop_scale", "image_index": 1 }
+    ]
+  }
+]`
+
 function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [models, setModels] = useState(null)
@@ -27,6 +43,7 @@ function App() {
 
   // Generation settings
   const [scenesText, setScenesText] = useState('')
+  const [videoVersion, setVideoVersion] = useState('v1') // 'v1' or 'v2'
   const [speechProvider, setSpeechProvider] = useState('google')
   const [speechModel, setSpeechModel] = useState('gemini-2.5-pro-preview-tts')
   const [customSpeechModel, setCustomSpeechModel] = useState('')
@@ -146,6 +163,25 @@ function App() {
     try {
       const parsed = JSON.parse(scenesText)
       if (!Array.isArray(parsed)) return { valid: false, count: 0, error: 'Must be a JSON array' }
+
+      if (videoVersion === 'v2') {
+        for (const s of parsed) {
+          if (!s.voiceover) return { valid: false, count: parsed.length, error: 'Each V2 scene needs "voiceover"' }
+          if (!Array.isArray(s.prompts) || s.prompts.length === 0) return { valid: false, count: parsed.length, error: 'Each V2 scene needs a "prompts" array with at least one prompt' }
+          if (!Array.isArray(s.visual_beats) || s.visual_beats.length === 0) return { valid: false, count: parsed.length, error: 'Each V2 scene needs a "visual_beats" array' }
+          for (const b of s.visual_beats) {
+            if (!b.trigger_word || !b.effect || b.image_index === undefined) {
+              return { valid: false, count: parsed.length, error: 'Each visual_beat needs "trigger_word", "effect", and "image_index"' }
+            }
+            if (b.image_index < 0 || b.image_index >= s.prompts.length) {
+              return { valid: false, count: parsed.length, error: `image_index ${b.image_index} is out of range for prompts array (length ${s.prompts.length})` }
+            }
+          }
+        }
+        return { valid: true, count: parsed.length, error: null }
+      }
+
+      // V1 validation
       for (const s of parsed) {
         if (!s.voiceover || !s.prompt) return { valid: false, count: parsed.length, error: 'Each scene needs "voiceover" and "prompt"' }
       }
@@ -153,7 +189,7 @@ function App() {
     } catch {
       return { valid: false, count: 0, error: 'Invalid JSON' }
     }
-  }, [scenesText])
+  }, [scenesText, videoVersion])
 
   const getActiveSpeechModel = () => useCustomSpeechModel && customSpeechModel ? customSpeechModel : speechModel
   const getActiveVoice = () => useCustomVoice && customVoice ? customVoice : speechVoice
@@ -215,6 +251,30 @@ function App() {
     }
   }
 
+  const regenerateV2Image = async (sceneIndex, promptIndex) => {
+    if (!jobId) return
+    setRegeneratingIndex(`${sceneIndex}_${promptIndex}`)
+    setError('')
+
+    try {
+      const res = await fetch(`${API_BASE}/regenerate-v2-image/${jobId}/${sceneIndex}/${promptIndex}`, {
+        method: 'POST',
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Regeneration failed')
+      }
+
+      // Refresh asset list
+      await loadReviewAssets(jobId)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRegeneratingIndex(null)
+    }
+  }
+
   const startGeneration = async () => {
     const { valid, error: parseError } = parseScenes()
     if (!valid) {
@@ -232,31 +292,40 @@ function App() {
     setReviewAssets([])
 
     const togDims = getTogetheraiDimensions()
+    const parsedScenes = JSON.parse(scenesText)
+
+    const body = {
+      version: videoVersion,
+      speech_provider: speechProvider,
+      speech_model: getActiveSpeechModel(),
+      speech_voice: getActiveVoice(),
+      image_provider: imageProvider,
+      image_model: getActiveImageModel(),
+      aspect_ratio: aspectRatio,
+      image_size: imageSize,
+      openai_image_size: openaiImageSize,
+      togetherai_width: togDims.width,
+      togetherai_height: togDims.height,
+      resolution,
+      orientation,
+      enable_zoom: enableZoom,
+      enable_shake: enableShake,
+      gemini_api_key: geminiApiKey,
+      openai_api_key: openaiApiKey,
+      together_api_key: togetherApiKey,
+    }
+
+    if (videoVersion === 'v2') {
+      body.v2_scenes = parsedScenes
+    } else {
+      body.scenes = parsedScenes
+    }
 
     try {
       const res = await fetch(`${API_BASE}/generate-assets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scenes: JSON.parse(scenesText),
-          speech_provider: speechProvider,
-          speech_model: getActiveSpeechModel(),
-          speech_voice: getActiveVoice(),
-          image_provider: imageProvider,
-          image_model: getActiveImageModel(),
-          aspect_ratio: aspectRatio,
-          image_size: imageSize,
-          openai_image_size: openaiImageSize,
-          togetherai_width: togDims.width,
-          togetherai_height: togDims.height,
-          resolution,
-          orientation,
-          enable_zoom: enableZoom,
-          enable_shake: enableShake,
-          gemini_api_key: geminiApiKey,
-          openai_api_key: openaiApiKey,
-          together_api_key: togetherApiKey,
-        }),
+        body: JSON.stringify(body),
       })
 
       if (!res.ok) {
@@ -895,32 +964,85 @@ function App() {
               <div className="card-header">
                 <h2>📝 Scenes</h2>
                 <div className="btn-group">
-                  <button className="btn btn-secondary btn-sm" onClick={loadDefaultScenes}>
-                    Load Default Scenes
-                  </button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_SCENES_EXAMPLE)}>
-                    Load Example Template
-                  </button>
+                  <div className="version-toggle" style={{ display: 'flex', gap: '0.25rem', background: darkMode ? '#1e1e2e' : '#e8e8e8', borderRadius: '0.5rem', padding: '0.2rem' }}>
+                    <button
+                      className={`btn btn-sm ${videoVersion === 'v1' ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => { setVideoVersion('v1'); setScenesText('') }}
+                      style={{ borderRadius: '0.4rem', minWidth: '3rem' }}
+                    >
+                      V1
+                    </button>
+                    <button
+                      className={`btn btn-sm ${videoVersion === 'v2' ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => { setVideoVersion('v2'); setScenesText('') }}
+                      style={{ borderRadius: '0.4rem', minWidth: '3rem' }}
+                    >
+                      V2
+                    </button>
+                  </div>
+                  {videoVersion === 'v1' && (
+                    <>
+                      <button className="btn btn-secondary btn-sm" onClick={loadDefaultScenes}>
+                        Load Default Scenes
+                      </button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_SCENES_EXAMPLE)}>
+                        Load Example Template
+                      </button>
+                    </>
+                  )}
+                  {videoVersion === 'v2' && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_V2_SCENES_EXAMPLE)}>
+                      Load V2 Example
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {videoVersion === 'v2' && (
+                <div className="v2-info-banner" style={{
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.08))',
+                  border: '1px solid rgba(99,102,241,0.25)',
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.85rem',
+                  color: darkMode ? '#a5b4fc' : '#4338ca',
+                }}>
+                  <strong>V2 Grouped Scenes:</strong> One voiceover maps to multiple images via visual beats.
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Effects:</strong>{' '}
+                    <code>zoom_in_slow</code> (gradual zoom in),{' '}
+                    <code>zoom_out_slow</code> (gradual zoom out),{' '}
+                    <code>audio_reactive_shake</code> (jitter at audio peak),{' '}
+                    <code>hard_cut</code> (instant switch to image),{' '}
+                    <code>pop_scale</code> (quick scale burst).
+                  </div>
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Color grades</strong> (optional):{' '}
+                    <code>dark</code>, <code>warm</code>, <code>cool</code>, <code>high_contrast</code>.
+                  </div>
+                </div>
+              )}
 
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
                   <label style={{ margin: 0 }}>Paste your scenes JSON array below</label>
                   {scenesText && (
                     <span className={`scene-count ${sceneInfo.valid ? 'valid' : 'invalid'}`}>
-                      {sceneInfo.valid ? `✓ ${sceneInfo.count} scenes` : `✗ ${sceneInfo.error}`}
+                      {sceneInfo.valid ? `✓ ${sceneInfo.count} ${videoVersion === 'v2' ? 'grouped scene' : 'scene'}${sceneInfo.count !== 1 ? 's' : ''}` : `✗ ${sceneInfo.error}`}
                     </span>
                   )}
                 </div>
                 <textarea
                   className="scene-editor"
-                  placeholder={DEFAULT_SCENES_EXAMPLE}
+                  placeholder={videoVersion === 'v2' ? DEFAULT_V2_SCENES_EXAMPLE : DEFAULT_SCENES_EXAMPLE}
                   value={scenesText}
                   onChange={e => setScenesText(e.target.value)}
                 />
                 <p className="help-text">
-                  Each scene needs a &quot;voiceover&quot; (text for speech) and a &quot;prompt&quot; (text for image generation).
+                  {videoVersion === 'v2'
+                    ? 'Each V2 scene needs "voiceover", "prompts" (array), and "visual_beats" (array with trigger_word, effect, image_index).'
+                    : 'Each scene needs a "voiceover" (text for speech) and a "prompt" (text for image generation).'}
                 </p>
               </div>
             </div>
@@ -1003,36 +1125,89 @@ function App() {
                     <p className="muted">Check each image below. Click &quot;Regenerate&quot; on any image that doesn&apos;t look right.</p>
                   </div>
 
-                  <div className="review-grid">
-                    {reviewAssets.map((asset, i) => (
-                      <div key={i} className="review-card">
-                        <div className="review-card-header">
-                          <span className="review-scene-label">Scene {i + 1}</span>
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            disabled={regeneratingIndex === i}
-                            onClick={() => regenerateImage(i)}
-                          >
-                            {regeneratingIndex === i ? (
-                              <><span className="spinner"></span> Regenerating...</>
-                            ) : (
-                              <>🔄 Regenerate</>
-                            )}
-                          </button>
-                        </div>
-                        <div className="review-image-wrapper">
-                          {asset.has_image ? (
-                            <img src={asset.image_url} alt={`Scene ${i + 1}`} className="review-image" />
-                          ) : (
-                            <div className="review-image-placeholder">No image generated</div>
+                  {videoVersion === 'v2' ? (
+                    /* V2 Review: grouped scenes with multiple images */
+                    <div className="review-grid">
+                      {reviewAssets.map((scene, sIdx) => (
+                        <div key={sIdx} className="review-card" style={{ gridColumn: '1 / -1' }}>
+                          <div className="review-card-header">
+                            <span className="review-scene-label">Grouped Scene {sIdx + 1}</span>
+                          </div>
+                          <p className="review-prompt" style={{ marginBottom: '0.5rem', fontStyle: 'italic' }}>
+                            {scene.voiceover && scene.voiceover.length > 150
+                              ? scene.voiceover.substring(0, 150) + '...'
+                              : scene.voiceover}
+                          </p>
+                          {scene.has_audio && (
+                            <audio controls src={scene.audio_url} style={{ width: '100%', marginBottom: '0.75rem' }} />
                           )}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                            {(scene.images || []).map((img, pIdx) => (
+                              <div key={pIdx} style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0.5rem', padding: '0.5rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                                  <span style={{ fontSize: '0.75rem', opacity: 0.7 }}>Image {pIdx + 1}</span>
+                                  <button
+                                    className="btn btn-secondary btn-sm"
+                                    disabled={regeneratingIndex === `${sIdx}_${pIdx}`}
+                                    onClick={() => regenerateV2Image(sIdx, pIdx)}
+                                    style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }}
+                                  >
+                                    {regeneratingIndex === `${sIdx}_${pIdx}` ? (
+                                      <><span className="spinner"></span> ...</>
+                                    ) : (
+                                      <>🔄</>
+                                    )}
+                                  </button>
+                                </div>
+                                <div className="review-image-wrapper">
+                                  {img.has_image ? (
+                                    <img src={img.image_url} alt={`Scene ${sIdx + 1} Image ${pIdx + 1}`} className="review-image" />
+                                  ) : (
+                                    <div className="review-image-placeholder">No image</div>
+                                  )}
+                                </div>
+                                <p className="review-prompt" title={img.prompt} style={{ fontSize: '0.75rem', marginTop: '0.3rem' }}>
+                                  {img.prompt && img.prompt.length > 60 ? img.prompt.substring(0, 60) + '...' : img.prompt}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <p className="review-prompt" title={asset.prompt}>
-                          {asset.prompt.length > 100 ? asset.prompt.substring(0, 100) + '...' : asset.prompt}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    /* V1 Review: one image per scene */
+                    <div className="review-grid">
+                      {reviewAssets.map((asset, i) => (
+                        <div key={i} className="review-card">
+                          <div className="review-card-header">
+                            <span className="review-scene-label">Scene {i + 1}</span>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              disabled={regeneratingIndex === i}
+                              onClick={() => regenerateImage(i)}
+                            >
+                              {regeneratingIndex === i ? (
+                                <><span className="spinner"></span> Regenerating...</>
+                              ) : (
+                                <>🔄 Regenerate</>
+                              )}
+                            </button>
+                          </div>
+                          <div className="review-image-wrapper">
+                            {asset.has_image ? (
+                              <img src={asset.image_url} alt={`Scene ${i + 1}`} className="review-image" />
+                            ) : (
+                              <div className="review-image-placeholder">No image generated</div>
+                            )}
+                          </div>
+                          <p className="review-prompt" title={asset.prompt}>
+                            {asset.prompt.length > 100 ? asset.prompt.substring(0, 100) + '...' : asset.prompt}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="review-actions">
                     <button
