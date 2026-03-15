@@ -10,3 +10,4 @@ sse-starlette
 together
 requests
 numpy
+librosa
