@@ -126,7 +126,6 @@ def _render_typewriter_frame(words: list[dict], current_time: float,
 
     font_size = max(28, int(h * 0.045))
     font = _get_font(font_size, bold=True)
-    font_highlight = _get_font(font_size, bold=True)
 
     # Find current visible words (show surrounding context)
     current_idx = 0
@@ -168,8 +167,7 @@ def _render_typewriter_frame(words: list[dict], current_time: float,
         else:
             color = (255, 255, 255, 220)
 
-        draw.text((x_cursor, y), word_text, font=font_highlight if is_current else font,
-                  fill=color)
+        draw.text((x_cursor, y), word_text, font=font, fill=color)
         word_bbox = draw.textbbox((0, 0), word_text + " ", font=font)
         x_cursor += word_bbox[2] - word_bbox[0]
 
@@ -225,8 +223,8 @@ def render_subtitles(video_clip: VideoClip, word_timestamps: list[dict],
         for phrase in phrases:
             if phrase["start"] <= t <= phrase["end"]:
                 return renderer(phrase["text"], target_size)
-        # No active phrase → transparent
-        return np.zeros((*target_size[::-1], 4), dtype=np.uint8)
+        # No active phrase → fully transparent frame (height, width, RGBA)
+        return np.zeros((target_size[1], target_size[0], 4), dtype=np.uint8)
 
     subtitle_clip = VideoClip(make_subtitle_frame, duration=duration)
     subtitle_clip = subtitle_clip.with_fps(video_clip.fps or 24)
