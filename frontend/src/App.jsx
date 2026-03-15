@@ -63,6 +63,8 @@ function App() {
   const [togetheraiSize, setTogetheraiSize] = useState('1024x576')
   const [enableZoom, setEnableZoom] = useState(false)
   const [enableShake, setEnableShake] = useState(false)
+  const [enableSubtitles, setEnableSubtitles] = useState(false)
+  const [subtitleStyle, setSubtitleStyle] = useState('cinematic')
 
   // Theme
   const [darkMode, setDarkMode] = useState(true)
@@ -331,6 +333,8 @@ function App() {
       orientation,
       enable_zoom: enableZoom,
       enable_shake: enableShake,
+      enable_subtitles: enableSubtitles,
+      subtitle_style: subtitleStyle,
       gemini_api_key: geminiApiKey,
       openai_api_key: openaiApiKey,
       together_api_key: togetherApiKey,
@@ -1076,6 +1080,34 @@ function App() {
                       <span className="switch-slider"></span>
                       <span className="switch-label">{enableShake ? 'On' : 'Off'}</span>
                     </label>
+                  </div>
+                  <div className="effect-card">
+                    <div className="effect-header">
+                      <span className="effect-icon">✨</span>
+                      <span className="effect-title">Fancy Subtitles</span>
+                      <span className="help-tooltip" title="Overlay stylish text subtitles on your video using word-level timestamps from the voiceover.">ℹ️</span>
+                    </div>
+                    <p className="effect-desc">Add designer-style text overlays on the video</p>
+                    <label className="switch-container">
+                      <input type="checkbox" checked={enableSubtitles} onChange={e => setEnableSubtitles(e.target.checked)} />
+                      <span className="switch-slider"></span>
+                      <span className="switch-label">{enableSubtitles ? 'On' : 'Off'}</span>
+                    </label>
+                    {enableSubtitles && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <label className="field-label" style={{ fontSize: '0.75rem', marginBottom: '0.25rem', display: 'block' }}>Style</label>
+                        <select
+                          className="select"
+                          value={subtitleStyle}
+                          onChange={e => setSubtitleStyle(e.target.value)}
+                          style={{ width: '100%', fontSize: '0.8rem', padding: '0.3rem' }}
+                        >
+                          <option value="cinematic">🎬 Cinematic</option>
+                          <option value="minimal">📝 Minimal</option>
+                          <option value="typewriter">⌨️ Typewriter</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
