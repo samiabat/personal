@@ -160,8 +160,9 @@ def _create_zoom_clip(image_path: str, duration: float, target_size: tuple,
     w, h = target_size
 
     # --- phase durations (clamp so they never exceed total duration) ---------
-    ease_in_dur = min(ease_duration, duration / 3.0)
-    ease_out_dur = min(ease_duration, duration / 3.0)
+    max_phase_dur = duration / 3.0
+    ease_in_dur = min(ease_duration, max_phase_dur)
+    ease_out_dur = min(ease_duration, max_phase_dur)
 
     if hold_duration is not None:
         hold_dur = hold_duration
