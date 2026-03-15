@@ -31,6 +31,7 @@ from v2_editor import (
     _create_static_clip,
     _create_shake_clip,
     apply_color_shift,
+    _sanitize_beats,
 )
 
 # ---------------------------------------------------------------------------
@@ -100,13 +101,12 @@ def _create_cinematic_zoom_clip(
     peak_scale = start_scale + (zoom_target - 1.0)
 
     if include_reset:
-        # Fit phases within available duration, shrinking proportionally
-        total_needed = zoom_in_dur + hold_dur + zoom_out_dur
-        if total_needed > duration:
-            ratio = duration / total_needed
-            zoom_in_dur *= ratio
-            hold_dur *= ratio
-            zoom_out_dur *= ratio
+        # Fit phases within available duration.  The hold phase fills
+        # whatever time remains after the ease-in and ease-out phases,
+        # ensuring the cinematic cycle spans the entire segment.
+        zoom_in_dur = min(zoom_in_dur, duration / 3.0)
+        zoom_out_dur = min(zoom_out_dur, duration / 3.0)
+        hold_dur = max(0.0, duration - zoom_in_dur - zoom_out_dur)
         zoom_phase_dur = zoom_in_dur
         hold_phase_dur = hold_dur
         ease_phase_dur = zoom_out_dur
@@ -285,6 +285,9 @@ def assemble_v3_video(image_paths: list[str], audio_path: str,
         })
 
     beat_events.sort(key=lambda x: x["time"])
+
+    # Enforce one-zoom-per-image and minimum spacing between effects
+    beat_events = _sanitize_beats(beat_events)
 
     for ev in beat_events:
         if ev["effect"] == "audio_reactive_shake":

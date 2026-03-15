@@ -16,16 +16,18 @@ const DEFAULT_SCENES_EXAMPLE = `[
 
 const DEFAULT_V2_SCENES_EXAMPLE = `[
   {
-    "voiceover": "Imagine your family's life depends on a single choice. A choice that could change everything.",
+    "voiceover": "In a world consumed by noise and chaos, one traveller dared to walk the forgotten path. The ancient forest whispered secrets that only the brave could hear. And at the journey's end, a single golden light revealed the truth that had been hidden for centuries.",
     "prompts": [
-      "Vibrant Ghibli style, old man on a dirt path, sunny hills",
-      "Vibrant Ghibli style, close up of a golden coin in a hand"
+      "Cinematic wide shot of a lone cloaked traveller walking along a misty mountain trail at dawn, golden hour lighting, dramatic clouds, epic fantasy landscape, 8K ultra detailed",
+      "Close up of ancient twisted trees in a mystical glowing forest, shafts of golden light piercing through fog, bioluminescent mushrooms on the ground, fantasy art style",
+      "Dramatic reveal of a radiant golden orb floating above a stone altar in a hidden cave, volumetric light rays, ancient runes carved into walls, cinematic lighting"
     ],
     "visual_beats": [
-      { "trigger_word": "Imagine", "effect": "zoom_in_slow", "image_index": 0 },
-      { "trigger_word": "single choice", "effect": "audio_reactive_shake", "image_index": 0 },
-      { "trigger_word": "change everything", "effect": "hard_cut", "image_index": 1 },
-      { "trigger_word": "everything", "effect": "pop_scale", "image_index": 1 }
+      { "trigger_word": "world", "effect": "zoom_in_slow", "image_index": 0 },
+      { "trigger_word": "forgotten path", "effect": "hard_cut", "image_index": 1 },
+      { "trigger_word": "whispered secrets", "effect": "audio_reactive_shake", "image_index": 1 },
+      { "trigger_word": "golden light", "effect": "hard_cut", "image_index": 2 },
+      { "trigger_word": "truth", "effect": "pop_scale", "image_index": 2 }
     ]
   }
 ]`

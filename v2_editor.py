@@ -300,6 +300,57 @@ def apply_color_shift(frame: np.ndarray, color_grade: str) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Beat validation helpers
+# ---------------------------------------------------------------------------
+
+ZOOM_EFFECTS = {"zoom_in_slow", "zoom_out_slow"}
+SCALE_EFFECTS = {"zoom_in_slow", "zoom_out_slow", "pop_scale"}
+MIN_EFFECT_GAP = 2.0  # minimum seconds between effects on the same image
+
+
+def _sanitize_beats(beat_events: list[dict]) -> list[dict]:
+    """Enforce effect constraints on resolved beat events.
+
+    Rules
+    -----
+    1. At most **one** zoom effect (``zoom_in_slow`` / ``zoom_out_slow``)
+       per ``image_index``.
+    2. Scale-based effects (``zoom_*`` / ``pop_scale``) on the **same** image
+       must be separated by at least ``MIN_EFFECT_GAP`` seconds; the later
+       duplicate is downgraded to ``hard_cut``.
+    """
+    # Track zoom usage per image index
+    image_zoom_used: dict[int, bool] = {}
+    # Track last scale-effect time per image index
+    image_last_scale_time: dict[int, float] = {}
+
+    sanitized = []
+    for ev in beat_events:
+        img_idx = ev["image_index"]
+        effect = ev["effect"]
+        t = ev["time"]
+
+        if effect in ZOOM_EFFECTS:
+            if image_zoom_used.get(img_idx, False):
+                # Already have a zoom on this image → downgrade to static cut
+                ev = {**ev, "effect": "hard_cut"}
+            else:
+                image_zoom_used[img_idx] = True
+
+        # Check minimum gap between scale effects on same image
+        if ev["effect"] in SCALE_EFFECTS:
+            last_t = image_last_scale_time.get(img_idx)
+            if last_t is not None and (t - last_t) < MIN_EFFECT_GAP:
+                ev = {**ev, "effect": "hard_cut"}
+            else:
+                image_last_scale_time[img_idx] = t
+
+        sanitized.append(ev)
+
+    return sanitized
+
+
+# ---------------------------------------------------------------------------
 # V2 assembly
 # ---------------------------------------------------------------------------
 
@@ -347,6 +398,9 @@ def assemble_v2_video(image_paths: list[str], audio_path: str,
         })
 
     beat_events.sort(key=lambda x: x["time"])
+
+    # Enforce one-zoom-per-image and minimum spacing between effects -------
+    beat_events = _sanitize_beats(beat_events)
 
     # For shake effects, snap to nearest audio peak --------------------------
     for ev in beat_events:
