@@ -34,9 +34,9 @@ from v2_editor import (
 # Constant-velocity zoom constants
 # ---------------------------------------------------------------------------
 
-ZOOM_SPEED = 0.02        # scale units per second
-HOLD_BREATH = 1.0        # seconds to hold peak scale after zoom phase
-EASE_OUT_RESET = 0.8     # seconds to ease back to 1.0
+ZOOM_SPEED = 0.02         # scale units per second
+HOLD_BREATH = 1.0         # seconds to hold peak scale after zoom phase
+EASE_OUT_RESET = 0.8      # seconds to ease back to 1.0
 
 
 # ---------------------------------------------------------------------------

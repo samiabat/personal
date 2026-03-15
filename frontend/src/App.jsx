@@ -272,8 +272,7 @@ function App() {
         throw new Error(data.detail || 'Regeneration failed')
       }
 
-      // Refresh asset list with cache-busting for the regenerated image
-      await loadReviewAssets(jobId)
+      // Update the specific image URL with cache-busting to force reload
       setReviewAssets(prev => prev.map((scene, sIdx) =>
         sIdx === sceneIndex
           ? {
