@@ -92,6 +92,17 @@ def find_nearest_audio_peak(audio_path: str, target_time: float,
 
 
 # ---------------------------------------------------------------------------
+# Cinematic zoom constants – consistent across all scenes
+# ---------------------------------------------------------------------------
+
+CINEMATIC_ZOOM_IN_DUR = 1.0    # seconds for smooth ease-in zoom
+CINEMATIC_HOLD_DUR = 3.0       # seconds to hold peak scale
+CINEMATIC_ZOOM_OUT_DUR = 1.0   # seconds for smooth ease-out back to 1.0
+MIN_ZOOM_DURATION = 5.0        # minimum segment length to apply zoom effects
+ZOOM_TARGET = 1.15             # peak zoom scale
+
+
+# ---------------------------------------------------------------------------
 # Easing helpers
 # ---------------------------------------------------------------------------
 
@@ -139,8 +150,8 @@ def _create_static_clip(image_path: str, duration: float, target_size: tuple,
 def _create_zoom_clip(image_path: str, duration: float, target_size: tuple,
                        direction: str = "in", fps: int = 24,
                        hold_duration: float | None = None,
-                       ease_duration: float = 0.5,
-                       zoom_target: float = 1.15) -> VideoClip:
+                       ease_duration: float = CINEMATIC_ZOOM_IN_DUR,
+                       zoom_target: float = ZOOM_TARGET) -> VideoClip:
     """Cinematic state-based zoom with Ease-In → Hold → Ease-Out phases.
 
     Parameters
@@ -295,7 +306,9 @@ def apply_color_shift(frame: np.ndarray, color_grade: str) -> np.ndarray:
 def assemble_v2_video(image_paths: list[str], audio_path: str,
                       visual_beats: list[dict], word_timestamps: list[dict],
                       output_path: str, target_size: tuple = (1920, 1080),
-                      fps: int = 24) -> str:
+                      fps: int = 24,
+                      enable_subtitles: bool = False,
+                      subtitle_style: str = "cinematic") -> str:
     """Build the final V2 video from images, one audio track & visual beats.
 
     Parameters
@@ -360,17 +373,23 @@ def assemble_v2_video(image_paths: list[str], audio_path: str,
         effect = ev["effect"]
 
         if effect == "zoom_in_slow":
-            hold = ev["hold_duration"]
-            if hold is None:
-                hold = seg_duration / 2.0
-            clip = _create_zoom_clip(img_path, seg_duration, target_size, "in",
-                                      fps, hold_duration=hold)
+            if seg_duration < MIN_ZOOM_DURATION:
+                clip = _create_static_clip(img_path, seg_duration, target_size, fps)
+            else:
+                hold = ev["hold_duration"]
+                if hold is None:
+                    hold = CINEMATIC_HOLD_DUR
+                clip = _create_zoom_clip(img_path, seg_duration, target_size, "in",
+                                          fps, hold_duration=hold)
         elif effect == "zoom_out_slow":
-            hold = ev["hold_duration"]
-            if hold is None:
-                hold = seg_duration / 2.0
-            clip = _create_zoom_clip(img_path, seg_duration, target_size, "out",
-                                      fps, hold_duration=hold)
+            if seg_duration < MIN_ZOOM_DURATION:
+                clip = _create_static_clip(img_path, seg_duration, target_size, fps)
+            else:
+                hold = ev["hold_duration"]
+                if hold is None:
+                    hold = CINEMATIC_HOLD_DUR
+                clip = _create_zoom_clip(img_path, seg_duration, target_size, "out",
+                                          fps, hold_duration=hold)
         elif effect == "audio_reactive_shake":
             peak_offset = max(0.0, ev.get("peak_time", start) - start)
             clip = _create_shake_clip(img_path, seg_duration, target_size,
@@ -395,5 +414,10 @@ def assemble_v2_video(image_paths: list[str], audio_path: str,
 
     final = concatenate_videoclips(segments, method="compose")
     final = final.with_audio(audio_clip)
+
+    if enable_subtitles:
+        from subtitle_renderer import render_subtitles
+        final = render_subtitles(final, word_timestamps, target_size, subtitle_style)
+
     final.write_videofile(output_path, fps=fps, codec="libx264", audio_codec="aac")
     return output_path
