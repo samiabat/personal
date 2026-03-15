@@ -38,6 +38,8 @@ class VisualBeat(BaseModel):
     effect: str  # zoom_in_slow, zoom_out_slow, audio_reactive_shake, hard_cut, pop_scale
     image_index: int
     color_grade: Optional[str] = None
+    focus_x: Optional[float] = None
+    focus_y: Optional[float] = None
 
 
 class V2Scene(BaseModel):
@@ -47,10 +49,10 @@ class V2Scene(BaseModel):
 
 
 class VideoRequest(BaseModel):
-    version: str = "v1"  # "v1" or "v2"
+    version: str = "v1"  # "v1", "v2", or "v3"
     # V1 fields
     scenes: list[Scene] = []
-    # V2 fields
+    # V2/V3 fields
     v2_scenes: list[V2Scene] = []
     # Common fields
     speech_provider: str = "google"  # "google" or "openai"
@@ -387,6 +389,87 @@ def run_v2_video_generation(job_id: str, request: VideoRequest):
         run_v2_video_assembly(job_id, request)
 
 
+def run_v3_video_generation(job_id: str, request: VideoRequest):
+    """Full V3 pipeline: V2 asset generation + V3 focus-aware assembly."""
+    run_v2_asset_generation(job_id, request)
+    job = jobs[job_id]
+    if job["status"] == "assets_ready":
+        job["status"] = "processing"
+        job["progress"] = 0
+        run_v3_video_assembly(job_id, request)
+
+
+def run_v3_video_assembly(job_id: str, request: VideoRequest):
+    """Background task: assemble V3 video using word-level timestamps + focus-aware effects."""
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+
+    try:
+        job["progress"] = 5
+        job["status"] = "processing"
+        job["message"] = "Analysing audio for word timestamps..."
+
+        from v2_editor import get_word_timestamps
+        from v3_editor import assemble_v3_video
+
+        target_size = _get_v2_resolution(request)
+        all_scene_clips_paths: list[str] = []
+
+        for s_idx, scene in enumerate(request.v2_scenes):
+            audio_path = f"{job_dir}/v2_scene_{s_idx}_audio.wav"
+            image_paths = [
+                f"{job_dir}/v2_scene_{s_idx}_image_{p}.jpg"
+                for p in range(len(scene.prompts))
+            ]
+
+            job["message"] = f"V3 Scene {s_idx + 1}: Extracting word timestamps..."
+            word_ts = get_word_timestamps(audio_path, api_key=request.openai_api_key or "")
+
+            scene_output = f"{job_dir}/v2_scene_{s_idx}_output.mp4"
+            job["message"] = f"V3 Scene {s_idx + 1}: Assembling video with focus-aware effects..."
+            beats = [b.model_dump() for b in scene.visual_beats]
+            assemble_v3_video(image_paths, audio_path, beats, word_ts,
+                              scene_output, target_size=target_size)
+            all_scene_clips_paths.append(scene_output)
+
+            job["progress"] = int(10 + (s_idx + 1) / len(request.v2_scenes) * 70)
+
+        if len(all_scene_clips_paths) == 1:
+            final_output = f"{job_dir}/output.mp4"
+            os.rename(all_scene_clips_paths[0], final_output)
+        else:
+            from moviepy import VideoFileClip, concatenate_videoclips
+            job["message"] = "Concatenating grouped scenes..."
+            clips = [VideoFileClip(p) for p in all_scene_clips_paths]
+            final = concatenate_videoclips(clips, method="compose")
+            final_output = f"{job_dir}/output.mp4"
+            final.write_videofile(final_output, fps=24, codec="libx264", audio_codec="aac")
+
+        job["progress"] = 90
+        job["message"] = "Cleaning up temporary files..."
+        for s_idx, scene in enumerate(request.v2_scenes):
+            audio_path = f"{job_dir}/v2_scene_{s_idx}_audio.wav"
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            for p_idx in range(len(scene.prompts)):
+                img_path = f"{job_dir}/v2_scene_{s_idx}_image_{p_idx}.jpg"
+                if os.path.exists(img_path):
+                    os.remove(img_path)
+            scene_output = f"{job_dir}/v2_scene_{s_idx}_output.mp4"
+            if os.path.exists(scene_output):
+                os.remove(scene_output)
+
+        job["progress"] = 100
+        job["status"] = "completed"
+        job["message"] = "V3 video generation completed!"
+        job["output_path"] = final_output
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
 def run_video_generation(job_id: str, request: VideoRequest):
     """Background task to generate video (full pipeline: assets + assembly)."""
     job = jobs[job_id]
@@ -486,6 +569,8 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
     }
     if request.version == "v2":
         background_tasks.add_task(run_v2_video_generation, job_id, request)
+    elif request.version == "v3":
+        background_tasks.add_task(run_v3_video_generation, job_id, request)
     else:
         background_tasks.add_task(run_video_generation, job_id, request)
     return {"job_id": job_id}
@@ -509,7 +594,9 @@ async def retry_job(job_id: str, background_tasks: BackgroundTasks):
     job["message"] = "Retrying job..."
     job["output_path"] = None
 
-    if request.version == "v2":
+    if request.version == "v3":
+        background_tasks.add_task(run_v3_video_generation, job_id, request)
+    elif request.version == "v2":
         background_tasks.add_task(run_v2_video_generation, job_id, request)
     else:
         background_tasks.add_task(run_video_generation, job_id, request)
@@ -528,7 +615,7 @@ async def generate_assets(request: VideoRequest, background_tasks: BackgroundTas
         "output_path": None,
         "request": request.model_dump(),
     }
-    if request.version == "v2":
+    if request.version in ("v2", "v3"):
         background_tasks.add_task(run_v2_asset_generation, job_id, request)
     else:
         background_tasks.add_task(run_asset_generation, job_id, request)
@@ -549,7 +636,7 @@ async def get_job_assets(job_id: str):
 
     version = request_data.get("version", "v1")
 
-    if version == "v2":
+    if version in ("v2", "v3"):
         assets = []
         for s_idx, scene in enumerate(request_data.get("v2_scenes", [])):
             audio_path = f"{job_dir}/v2_scene_{s_idx}_audio.wav"
@@ -559,6 +646,7 @@ async def get_job_assets(job_id: str):
                 "has_audio": os.path.exists(audio_path) and os.path.getsize(audio_path) > 0,
                 "audio_url": f"/api/scene-audio/{job_id}/{s_idx}",
                 "images": [],
+                "visual_beats": scene.get("visual_beats", []),
             }
             for p_idx, prompt in enumerate(scene["prompts"]):
                 img_path = f"{job_dir}/v2_scene_{s_idx}_image_{p_idx}.jpg"
@@ -570,7 +658,7 @@ async def get_job_assets(job_id: str):
                 })
             assets.append(scene_assets)
         total = len(request_data.get("v2_scenes", []))
-        return {"job_id": job_id, "version": "v2", "total_scenes": total, "assets": assets}
+        return {"job_id": job_id, "version": version, "total_scenes": total, "assets": assets}
 
     # V1 path
     total_scenes = len(request_data["scenes"])
@@ -616,12 +704,12 @@ async def get_v2_scene_image(job_id: str, scene_index: int, prompt_index: int):
 
 @app.get("/api/scene-audio/{job_id}/{scene_index}")
 async def get_scene_audio(job_id: str, scene_index: int):
-    """Serve a specific scene audio for review (V1 or V2)."""
+    """Serve a specific scene audio for review (V1, V2, or V3)."""
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = jobs[job_id]
     version = job["request"].get("version", "v1")
-    if version == "v2":
+    if version in ("v2", "v3"):
         audio_path = f"{JOBS_DIR}/{job_id}/v2_scene_{scene_index}_audio.wav"
     else:
         audio_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_audio.wav"
@@ -732,6 +820,36 @@ async def approve_assets(job_id: str):
     return {"success": True}
 
 
+class FocusPointUpdate(BaseModel):
+    scene_index: int
+    beat_index: int
+    focus_x: float
+    focus_y: float
+
+
+@app.post("/api/update-focus-point/{job_id}")
+async def update_focus_point(job_id: str, update: FocusPointUpdate):
+    """Save a director-selected focus point into a V3 visual beat."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+
+    v2_scenes = job["request"].get("v2_scenes", [])
+    if update.scene_index < 0 or update.scene_index >= len(v2_scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+    beats = v2_scenes[update.scene_index].get("visual_beats", [])
+    if update.beat_index < 0 or update.beat_index >= len(beats):
+        raise HTTPException(status_code=400, detail="Invalid beat index")
+
+    # Clamp to [0, 1]
+    fx = max(0.0, min(1.0, update.focus_x))
+    fy = max(0.0, min(1.0, update.focus_y))
+
+    beats[update.beat_index]["focus_x"] = fx
+    beats[update.beat_index]["focus_y"] = fy
+    return {"success": True, "focus_x": fx, "focus_y": fy}
+
+
 @app.post("/api/prepare-video/{job_id}")
 async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
     """Assemble video from approved assets."""
@@ -749,7 +867,9 @@ async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
     job["message"] = "Preparing video..."
     job["output_path"] = None
 
-    if request.version == "v2":
+    if request.version == "v3":
+        background_tasks.add_task(run_v3_video_assembly, job_id, request)
+    elif request.version == "v2":
         background_tasks.add_task(run_v2_video_assembly, job_id, request)
     else:
         background_tasks.add_task(run_video_assembly, job_id, request)
