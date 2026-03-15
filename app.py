@@ -70,6 +70,8 @@ class VideoRequest(BaseModel):
     enable_ken_burns: bool = False
     enable_zoom: bool = False
     enable_shake: bool = False
+    enable_subtitles: bool = False
+    subtitle_style: str = "cinematic"  # "cinematic", "minimal", or "typewriter"
     gemini_api_key: Optional[str] = ""
     openai_api_key: Optional[str] = ""
     together_api_key: Optional[str] = ""
@@ -336,7 +338,9 @@ def run_v2_video_assembly(job_id: str, request: VideoRequest):
             job["message"] = f"V2 Scene {s_idx + 1}: Assembling video with effects..."
             beats = [b.model_dump() for b in scene.visual_beats]
             assemble_v2_video(image_paths, audio_path, beats, word_ts,
-                              scene_output, target_size=target_size)
+                              scene_output, target_size=target_size,
+                              enable_subtitles=request.enable_subtitles,
+                              subtitle_style=request.subtitle_style)
             all_scene_clips_paths.append(scene_output)
 
             job["progress"] = int(10 + (s_idx + 1) / len(request.v2_scenes) * 70)
@@ -429,7 +433,9 @@ def run_v3_video_assembly(job_id: str, request: VideoRequest):
             job["message"] = f"V3 Scene {s_idx + 1}: Assembling video with focus-aware effects..."
             beats = [b.model_dump() for b in scene.visual_beats]
             assemble_v3_video(image_paths, audio_path, beats, word_ts,
-                              scene_output, target_size=target_size)
+                              scene_output, target_size=target_size,
+                              enable_subtitles=request.enable_subtitles,
+                              subtitle_style=request.subtitle_style)
             all_scene_clips_paths.append(scene_output)
 
             job["progress"] = int(10 + (s_idx + 1) / len(request.v2_scenes) * 70)
