@@ -32,6 +32,21 @@ const DEFAULT_V2_SCENES_EXAMPLE = `[
   }
 ]`
 
+const DEFAULT_V5_SCENES_EXAMPLE = `[
+  {
+    "voiceover": "An elderly water bearer had two large pots. One was perfect, but the other had a tiny crack.",
+    "prompt": "Vibrant Ghibli-esque anime style. An elderly Ethiopian man carrying two water pots on a mountain path. Cinematic motion.",
+    "media_type": "video",
+    "time_fit_strategy": "auto"
+  },
+  {
+    "voiceover": "Every day he walked to the stream and back. The cracked pot arrived only half full, ashamed of its imperfection.",
+    "prompt": "Ghibli anime style. Close-up of a cracked clay pot with water dripping on a dusty trail. Warm golden light, gentle camera pan.",
+    "media_type": "video",
+    "time_fit_strategy": "cinematic_slow_mo"
+  }
+]`
+
 function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [models, setModels] = useState(null)
@@ -45,7 +60,7 @@ function App() {
 
   // Generation settings
   const [scenesText, setScenesText] = useState('')
-  const [videoVersion, setVideoVersion] = useState('v1') // 'v1', 'v2', or 'v3'
+  const [videoVersion, setVideoVersion] = useState('v1') // 'v1', 'v2', 'v3', or 'v5'
   const [speechProvider, setSpeechProvider] = useState('google')
   const [speechModel, setSpeechModel] = useState('gemini-2.5-pro-preview-tts')
   const [customSpeechModel, setCustomSpeechModel] = useState('')
@@ -89,6 +104,11 @@ function App() {
   const [directorReviewIndex, setDirectorReviewIndex] = useState(0)
   const [directorFocus, setDirectorFocus] = useState(null) // {x, y} or null
   const [directorReviewDone, setDirectorReviewDone] = useState(false)
+
+  // V5 Asset Dashboard
+  const [v5UploadedVideos, setV5UploadedVideos] = useState({}) // { sceneIndex: true }
+  const [v5Uploading, setV5Uploading] = useState(null) // scene index currently uploading
+  const [v5CopiedIndex, setV5CopiedIndex] = useState(null) // scene index whose prompt was copied
 
   // Test panel
   const [testAudioText, setTestAudioText] = useState('Hello! This is a test of the text to speech system.')
@@ -173,6 +193,14 @@ function App() {
     try {
       const parsed = JSON.parse(scenesText)
       if (!Array.isArray(parsed)) return { valid: false, count: 0, error: 'Must be a JSON array' }
+
+      if (videoVersion === 'v5') {
+        for (const s of parsed) {
+          if (!s.voiceover) return { valid: false, count: parsed.length, error: 'Each V5 scene needs "voiceover"' }
+          if (!s.prompt) return { valid: false, count: parsed.length, error: 'Each V5 scene needs "prompt"' }
+        }
+        return { valid: true, count: parsed.length, error: null }
+      }
 
       if (videoVersion === 'v2' || videoVersion === 'v3') {
         for (const s of parsed) {
@@ -342,7 +370,9 @@ function App() {
       together_api_key: togetherApiKey,
     }
 
-    if (videoVersion === 'v2' || videoVersion === 'v3') {
+    if (videoVersion === 'v5') {
+      body.v5_scenes = parsedScenes
+    } else if (videoVersion === 'v2' || videoVersion === 'v3') {
       body.v2_scenes = parsedScenes
     } else {
       body.scenes = parsedScenes
@@ -414,6 +444,63 @@ function App() {
     } catch (err) {
       setError(err.message)
     }
+  }
+
+  // ── V5 Asset Dashboard helpers ──
+
+  const v5CopyPrompt = async (prompt, sceneIndex) => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setV5CopiedIndex(sceneIndex)
+      setTimeout(() => setV5CopiedIndex(null), 2000)
+    } catch {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea')
+      ta.value = prompt
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setV5CopiedIndex(sceneIndex)
+      setTimeout(() => setV5CopiedIndex(null), 2000)
+    }
+  }
+
+  const v5UploadVideo = async (sceneIndex, file) => {
+    if (!jobId || !file) return
+    setV5Uploading(sceneIndex)
+    setError('')
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const res = await fetch(`${API_BASE}/v5-upload-video/${jobId}/${sceneIndex}`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Upload failed')
+      }
+
+      setV5UploadedVideos(prev => ({ ...prev, [sceneIndex]: true }))
+
+      // Refresh review assets to reflect the new video
+      setReviewAssets(prev => prev.map((a, i) =>
+        i === sceneIndex ? { ...a, has_video: true, video_url: `${API_BASE}/v5-scene-video/${jobId}/${sceneIndex}?t=${Date.now()}` } : a
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setV5Uploading(null)
+    }
+  }
+
+  const v5AllVideosUploaded = () => {
+    if (videoVersion !== 'v5') return true
+    return reviewAssets.length > 0 && reviewAssets.every(a => a.has_video || v5UploadedVideos[a.scene_index])
   }
 
   const prepareVideo = async () => {
@@ -1142,6 +1229,13 @@ function App() {
                     >
                       V3
                     </button>
+                    <button
+                      className={`btn btn-sm ${videoVersion === 'v5' ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => { setVideoVersion('v5'); setScenesText(''); setV5UploadedVideos({}); setV5CopiedIndex(null) }}
+                      style={{ borderRadius: '0.4rem', minWidth: '3rem' }}
+                    >
+                      V5
+                    </button>
                   </div>
                   {videoVersion === 'v1' && (
                     <>
@@ -1156,6 +1250,11 @@ function App() {
                   {(videoVersion === 'v2' || videoVersion === 'v3') && (
                     <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_V2_SCENES_EXAMPLE)}>
                       Load {videoVersion.toUpperCase()} Example
+                    </button>
+                  )}
+                  {videoVersion === 'v5' && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_V5_SCENES_EXAMPLE)}>
+                      Load V5 Example
                     </button>
                   )}
                 </div>
@@ -1192,6 +1291,33 @@ function App() {
                 </div>
               )}
 
+              {videoVersion === 'v5' && (
+                <div className="v5-info-banner" style={{
+                  background: 'linear-gradient(135deg, rgba(16,185,129,0.12), rgba(6,182,212,0.08))',
+                  border: '1px solid rgba(16,185,129,0.25)',
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.85rem',
+                  color: darkMode ? '#6ee7b7' : '#047857',
+                }}>
+                  <strong>🎬 V5 Video Clip Mode:</strong> Upload AI-generated video clips (e.g. from Grok) for each scene.
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Workflow:</strong> Generate voiceover → Copy prompt → Generate 6s clip in Grok → Upload clip → Render
+                  </div>
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Time-fit strategies:</strong>{' '}
+                    <code>auto</code> (smart select),{' '}
+                    <code>trim</code> (audio &lt; 6s),{' '}
+                    <code>cinematic_slow_mo</code> (6–12s),{' '}
+                    <code>loop_or_freeze</code> (&gt; 12s).
+                  </div>
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    📢 Uploaded clip audio is stripped — only TTS voiceover plays in the final video.
+                  </div>
+                </div>
+              )}
+
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
                   <label style={{ margin: 0 }}>Paste your scenes JSON array below</label>
@@ -1203,12 +1329,14 @@ function App() {
                 </div>
                 <textarea
                   className="scene-editor"
-                  placeholder={(videoVersion === 'v2' || videoVersion === 'v3') ? DEFAULT_V2_SCENES_EXAMPLE : DEFAULT_SCENES_EXAMPLE}
+                  placeholder={videoVersion === 'v5' ? DEFAULT_V5_SCENES_EXAMPLE : (videoVersion === 'v2' || videoVersion === 'v3') ? DEFAULT_V2_SCENES_EXAMPLE : DEFAULT_SCENES_EXAMPLE}
                   value={scenesText}
                   onChange={e => setScenesText(e.target.value)}
                 />
                 <p className="help-text">
-                  {(videoVersion === 'v2' || videoVersion === 'v3')
+                  {videoVersion === 'v5'
+                    ? 'Each V5 scene needs "voiceover", "prompt", and optionally "media_type" and "time_fit_strategy".'
+                    : (videoVersion === 'v2' || videoVersion === 'v3')
                     ? `Each ${videoVersion.toUpperCase()} scene needs "voiceover", "prompts" (array), and "visual_beats" (array with trigger_word, effect, image_index).`
                     : 'Each scene needs a "voiceover" (text for speech) and a "prompt" (text for image generation).'}
                 </p>
@@ -1226,14 +1354,14 @@ function App() {
               <div className="workflow-stepper">
                 <div className={`workflow-step ${workflowStep >= 1 ? 'active' : ''} ${workflowStep > 1 ? 'completed' : ''}`}>
                   <div className="step-number">{workflowStep > 1 ? '✓' : '1'}</div>
-                  <div className="step-label">Generate Audio & Images</div>
+                  <div className="step-label">{videoVersion === 'v5' ? 'Generate Voiceover' : 'Generate Audio & Images'}</div>
                 </div>
                 <div className={`step-connector ${workflowStep > 1 ? 'active' : ''}`}>
                   <span className="step-arrow">→</span>
                 </div>
                 <div className={`workflow-step ${workflowStep >= 2 ? 'active' : ''} ${workflowStep > 2 ? 'completed' : ''}`}>
                   <div className="step-number">{workflowStep > 2 ? '✓' : '2'}</div>
-                  <div className="step-label">Review Resources</div>
+                  <div className="step-label">{videoVersion === 'v5' ? 'Upload Video Clips' : 'Review Resources'}</div>
                 </div>
                 <div className={`step-connector ${workflowStep > 2 ? 'active' : ''}`}>
                   <span className="step-arrow">→</span>
@@ -1252,10 +1380,12 @@ function App() {
                     disabled={!sceneInfo.valid || isGenerating}
                     onClick={startGeneration}
                   >
-                    🎙️🖼️ Generate Audio & Images
+                    {videoVersion === 'v5' ? '🎙️ Generate Voiceover Audio' : '🎙️🖼️ Generate Audio & Images'}
                   </button>
                   <p className="help-text" style={{ textAlign: 'center', marginTop: '0.5rem' }}>
-                    This will generate voiceover audio and images for all scenes. You can review them before creating the video.
+                    {videoVersion === 'v5'
+                      ? 'This will generate TTS voiceover audio for all scenes. You will then upload video clips for each scene.'
+                      : 'This will generate voiceover audio and images for all scenes. You can review them before creating the video.'}
                   </p>
                 </div>
               )}
@@ -1289,11 +1419,132 @@ function App() {
               {workflowStep === 2 && (
                 <div className="workflow-action">
                   <div className="review-header">
-                    <h3>📋 Review Generated Resources</h3>
-                    <p className="muted">Check each image below. Click &quot;Regenerate&quot; on any image that doesn&apos;t look right.</p>
+                    <h3>{videoVersion === 'v5' ? '🎬 V5 Asset Dashboard' : '📋 Review Generated Resources'}</h3>
+                    <p className="muted">
+                      {videoVersion === 'v5'
+                        ? 'Copy each prompt, generate a 6-second video clip in Grok, then upload the .mp4 file for each scene.'
+                        : 'Check each image below. Click "Regenerate" on any image that doesn\'t look right.'}
+                    </p>
                   </div>
 
-                  {(videoVersion === 'v2' || videoVersion === 'v3') ? (
+                  {videoVersion === 'v5' ? (
+                    /* V5 Asset Dashboard: upload video clips for each scene */
+                    <div className="review-grid" style={{ gridTemplateColumns: '1fr' }}>
+                      {reviewAssets.map((asset, idx) => (
+                        <div key={idx} className="review-card" style={{
+                          gridColumn: '1 / -1',
+                          border: (asset.has_video || v5UploadedVideos[idx])
+                            ? '2px solid rgba(16,185,129,0.5)'
+                            : '2px solid rgba(245,158,11,0.3)',
+                          background: (asset.has_video || v5UploadedVideos[idx])
+                            ? 'rgba(16,185,129,0.05)'
+                            : 'rgba(245,158,11,0.03)',
+                        }}>
+                          <div className="review-card-header" style={{ marginBottom: '0.75rem' }}>
+                            <span className="review-scene-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              {(asset.has_video || v5UploadedVideos[idx]) ? '✅' : '⏳'} Scene {idx + 1}
+                              {asset.time_fit_strategy && (
+                                <code style={{ fontSize: '0.7rem', opacity: 0.7, padding: '0.1rem 0.4rem', background: 'rgba(99,102,241,0.15)', borderRadius: '0.25rem' }}>
+                                  {asset.time_fit_strategy}
+                                </code>
+                              )}
+                            </span>
+                          </div>
+
+                          {/* Voiceover text */}
+                          <div style={{ marginBottom: '0.75rem' }}>
+                            <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Voiceover</div>
+                            <p style={{ fontSize: '0.9rem', lineHeight: '1.6', margin: 0, fontStyle: 'italic' }}>
+                              &ldquo;{asset.voiceover}&rdquo;
+                            </p>
+                          </div>
+
+                          {/* Audio player */}
+                          {asset.has_audio && (
+                            <audio controls src={asset.audio_url} style={{ width: '100%', marginBottom: '0.75rem' }} />
+                          )}
+
+                          {/* Visual prompt + copy button */}
+                          <div style={{
+                            background: darkMode ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)',
+                            borderRadius: '0.5rem',
+                            padding: '0.75rem',
+                            marginBottom: '0.75rem',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Visual Prompt</div>
+                                <p style={{ fontSize: '0.85rem', lineHeight: '1.5', margin: 0 }}>{asset.prompt}</p>
+                              </div>
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => v5CopyPrompt(asset.prompt, idx)}
+                                style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                              >
+                                {v5CopiedIndex === idx ? '✅ Copied!' : '📋 Copy Prompt'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Upload / Preview area */}
+                          {(asset.has_video || v5UploadedVideos[idx]) ? (
+                            <div>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Uploaded Video</div>
+                              <video
+                                controls
+                                src={asset.video_url}
+                                style={{ width: '100%', maxHeight: '300px', borderRadius: '0.5rem', background: '#000' }}
+                              />
+                              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                <label
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                                >
+                                  🔄 Replace
+                                  <input
+                                    type="file"
+                                    accept=".mp4,video/mp4"
+                                    style={{ display: 'none' }}
+                                    onChange={e => { if (e.target.files?.[0]) v5UploadVideo(idx, e.target.files[0]) }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{
+                              border: '2px dashed rgba(245,158,11,0.3)',
+                              borderRadius: '0.75rem',
+                              padding: '1.5rem',
+                              textAlign: 'center',
+                              background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.03)',
+                            }}>
+                              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎥</div>
+                              <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', opacity: 0.7 }}>
+                                Generate a 6-second clip using the prompt above, then upload the .mp4 file
+                              </p>
+                              <label
+                                className="btn btn-primary"
+                                style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                              >
+                                {v5Uploading === idx ? (
+                                  <><span className="spinner"></span> Uploading...</>
+                                ) : (
+                                  <>📤 Upload Video (.mp4)</>
+                                )}
+                                <input
+                                  type="file"
+                                  accept=".mp4,video/mp4"
+                                  style={{ display: 'none' }}
+                                  disabled={v5Uploading === idx}
+                                  onChange={e => { if (e.target.files?.[0]) v5UploadVideo(idx, e.target.files[0]) }}
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (videoVersion === 'v2' || videoVersion === 'v3') ? (
                     /* V2 Review: grouped scenes with multiple images */
                     <div className="review-grid">
                       {reviewAssets.map((scene, sIdx) => (
@@ -1377,15 +1628,46 @@ function App() {
                     </div>
                   )}
 
-                  <div className="review-actions">
-                    <button
-                      className="btn btn-success btn-block btn-glow"
-                      onClick={() => { approveAssets(); if (videoVersion === 'v3') initDirectorReview(); }}
-                      disabled={assetsApproved}
-                    >
-                      {assetsApproved ? '✅ Approved' : '✅ Approve & Continue'}
-                    </button>
-                  </div>
+                  {videoVersion === 'v5' ? (
+                    /* V5: Show progress indicator + prepare button when all videos uploaded */
+                    <div className="review-actions">
+                      {!v5AllVideosUploaded() ? (
+                        <div style={{
+                          padding: '0.75rem 1rem',
+                          background: 'rgba(245,158,11,0.1)',
+                          border: '1px solid rgba(245,158,11,0.25)',
+                          borderRadius: '0.5rem',
+                          textAlign: 'center',
+                          fontSize: '0.9rem',
+                        }}>
+                          ⏳ Upload video clips for all {reviewAssets.length} scene{reviewAssets.length !== 1 ? 's' : ''} to proceed
+                          <span style={{ marginLeft: '0.5rem', fontWeight: 600 }}>
+                            ({Object.keys(v5UploadedVideos).length + reviewAssets.filter(a => a.has_video).length}/{reviewAssets.length})
+                          </span>
+                        </div>
+                      ) : (
+                        <div>
+                          <button
+                            className="btn btn-success btn-block btn-glow"
+                            onClick={() => { approveAssets() }}
+                            disabled={assetsApproved}
+                          >
+                            {assetsApproved ? '✅ All Clips Ready' : '✅ Confirm All Clips & Continue'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="review-actions">
+                      <button
+                        className="btn btn-success btn-block btn-glow"
+                        onClick={() => { approveAssets(); if (videoVersion === 'v3') initDirectorReview(); }}
+                        disabled={assetsApproved}
+                      >
+                        {assetsApproved ? '✅ Approved' : '✅ Approve & Continue'}
+                      </button>
+                    </div>
+                  )}
 
                   {/* V3 Director Review UI */}
                   {assetsApproved && videoVersion === 'v3' && !directorReviewDone && directorReviewBeats.length > 0 && (
@@ -1560,6 +1842,8 @@ function App() {
                       setDirectorReviewIndex(0)
                       setDirectorFocus(null)
                       setDirectorReviewDone(false)
+                      setV5UploadedVideos({})
+                      setV5CopiedIndex(null)
                     }}
                   >
                     🔄 Start New Video
