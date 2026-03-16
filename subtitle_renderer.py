@@ -68,63 +68,103 @@ def _group_words_into_phrases(word_timestamps: list[dict],
 # Style renderers
 # ---------------------------------------------------------------------------
 
-def _render_cinematic_frame(text: str, size: tuple) -> np.ndarray:
-    """Render a centred cinematic subtitle with shadow."""
+def _render_cinematic_frame(text: str, size: tuple, opacity: float = 1.0) -> np.ndarray:
+    """Render a centred cinematic subtitle with glow, outline and shadow.
+
+    Parameters
+    ----------
+    opacity : float
+        Overall opacity multiplier (0.0–1.0) used for fade-in / fade-out.
+    """
     w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    font_size = max(28, int(h * 0.045))
+    font_size = max(48, int(h * 0.07))
     font = _get_font(font_size, bold=True)
 
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     x = (w - tw) // 2
-    y = int(h * 0.82)
+    y = int(h * 0.78)
 
-    # Shadow
-    shadow_offset = max(2, font_size // 16)
+    alpha = int(255 * np.clip(opacity, 0.0, 1.0))
+
+    # Soft glow (large blurred shadow behind text)
+    glow_offset = max(3, font_size // 10)
+    for dx, dy in [(-glow_offset, 0), (glow_offset, 0),
+                   (0, -glow_offset), (0, glow_offset)]:
+        draw.text((x + dx, y + dy), text,
+                  font=font, fill=(0, 0, 0, min(60, alpha)))
+
+    # Dark shadow for depth
+    shadow_offset = max(3, font_size // 12)
     draw.text((x + shadow_offset, y + shadow_offset), text,
-              font=font, fill=(0, 0, 0, 200))
+              font=font, fill=(0, 0, 0, min(220, alpha)))
+
+    # Text outline (stroke)
+    outline_width = max(2, font_size // 20)
+    for dx in range(-outline_width, outline_width + 1):
+        for dy in range(-outline_width, outline_width + 1):
+            if dx == 0 and dy == 0:
+                continue
+            draw.text((x + dx, y + dy), text,
+                      font=font, fill=(0, 0, 0, min(180, alpha)))
+
     # Main text
-    draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))
+    draw.text((x, y), text, font=font, fill=(255, 255, 255, alpha))
 
     return np.array(img)
 
 
-def _render_minimal_frame(text: str, size: tuple) -> np.ndarray:
-    """Render a bottom-bar subtitle with semi-transparent background."""
+def _render_minimal_frame(text: str, size: tuple, opacity: float = 1.0) -> np.ndarray:
+    """Render a bottom-bar subtitle with semi-transparent background.
+
+    Parameters
+    ----------
+    opacity : float
+        Overall opacity multiplier (0.0–1.0) used for fade-in / fade-out.
+    """
     w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    font_size = max(22, int(h * 0.035))
+    font_size = max(36, int(h * 0.055))
     font = _get_font(font_size, bold=False)
 
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     x = (w - tw) // 2
-    y = int(h * 0.90)
+    y = int(h * 0.87)
 
-    pad = 10
+    alpha = int(255 * np.clip(opacity, 0.0, 1.0))
+    bg_alpha = int(180 * np.clip(opacity, 0.0, 1.0))
+
+    pad = 14
     draw.rounded_rectangle(
         [x - pad, y - pad, x + tw + pad, y + th + pad],
-        radius=8,
-        fill=(0, 0, 0, 160),
+        radius=10,
+        fill=(0, 0, 0, bg_alpha),
     )
-    draw.text((x, y), text, font=font, fill=(255, 255, 255, 240))
+    draw.text((x, y), text, font=font, fill=(255, 255, 255, alpha))
 
     return np.array(img)
 
 
 def _render_typewriter_frame(words: list[dict], current_time: float,
-                             size: tuple) -> np.ndarray:
-    """Render words with the current word highlighted."""
+                             size: tuple, opacity: float = 1.0) -> np.ndarray:
+    """Render words with the current word highlighted.
+
+    Parameters
+    ----------
+    opacity : float
+        Overall opacity multiplier (0.0–1.0) used for fade-in / fade-out.
+    """
     w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    font_size = max(28, int(h * 0.045))
+    font_size = max(48, int(h * 0.07))
     font = _get_font(font_size, bold=True)
 
     # Find current visible words (show surrounding context)
@@ -149,12 +189,23 @@ def _render_typewriter_frame(words: list[dict], current_time: float,
     bbox = draw.textbbox((0, 0), full_text, font=font)
     total_w = bbox[2] - bbox[0]
     x_start = (w - total_w) // 2
-    y = int(h * 0.82)
+    y = int(h * 0.78)
+
+    alpha = int(255 * np.clip(opacity, 0.0, 1.0))
+
+    # Dark outline for readability
+    outline_width = max(2, font_size // 20)
+    for dx in range(-outline_width, outline_width + 1):
+        for dy in range(-outline_width, outline_width + 1):
+            if dx == 0 and dy == 0:
+                continue
+            draw.text((x_start + dx, y + dy), full_text,
+                      font=font, fill=(0, 0, 0, min(160, alpha)))
 
     # Shadow backdrop
-    shadow_offset = max(2, font_size // 16)
+    shadow_offset = max(3, font_size // 12)
     draw.text((x_start + shadow_offset, y + shadow_offset), full_text,
-              font=font, fill=(0, 0, 0, 180))
+              font=font, fill=(0, 0, 0, min(200, alpha)))
 
     # Render each word, highlighting the current one
     x_cursor = x_start
@@ -163,15 +214,46 @@ def _render_typewriter_frame(words: list[dict], current_time: float,
         is_current = wd["start"] <= current_time <= wd["end"]
 
         if is_current:
-            color = (255, 220, 80, 255)  # Gold highlight
+            color = (255, 220, 80, alpha)  # Gold highlight
         else:
-            color = (255, 255, 255, 220)
+            color = (255, 255, 255, min(220, alpha))
 
         draw.text((x_cursor, y), word_text, font=font, fill=color)
         word_bbox = draw.textbbox((0, 0), word_text + " ", font=font)
         x_cursor += word_bbox[2] - word_bbox[0]
 
     return np.array(img)
+
+
+# ---------------------------------------------------------------------------
+# Fade helpers
+# ---------------------------------------------------------------------------
+
+FADE_IN_DUR = 0.25   # seconds for subtitle fade-in
+FADE_OUT_DUR = 0.20  # seconds for subtitle fade-out
+MAX_FADE_RATIO = 0.3  # fades are capped at 30% of the phrase duration
+
+
+def _compute_phrase_opacity(t: float, phrase_start: float, phrase_end: float) -> float:
+    """Compute a smooth fade-in / fade-out opacity for a phrase at time *t*."""
+    phrase_dur = phrase_end - phrase_start
+    if phrase_dur <= 0:
+        return 1.0
+
+    elapsed = t - phrase_start
+    remaining = phrase_end - t
+
+    # Fade in
+    fade_in = min(FADE_IN_DUR, phrase_dur * MAX_FADE_RATIO)
+    if elapsed < fade_in and fade_in > 0:
+        return float(np.clip(elapsed / fade_in, 0.0, 1.0))
+
+    # Fade out
+    fade_out = min(FADE_OUT_DUR, phrase_dur * MAX_FADE_RATIO)
+    if remaining < fade_out and fade_out > 0:
+        return float(np.clip(remaining / fade_out, 0.0, 1.0))
+
+    return 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +289,13 @@ def render_subtitles(video_clip: VideoClip, word_timestamps: list[dict],
     if style == "typewriter":
         # Typewriter needs per-frame word lookup
         def make_subtitle_frame(t):
-            return _render_typewriter_frame(word_timestamps, t, target_size)
+            # Find which word is active to compute opacity for the group
+            opacity = 1.0
+            if t < word_timestamps[0]["start"]:
+                opacity = 0.0
+            elif t > word_timestamps[-1]["end"]:
+                opacity = 0.0
+            return _render_typewriter_frame(word_timestamps, t, target_size, opacity)
 
         subtitle_clip = VideoClip(make_subtitle_frame, duration=duration)
         subtitle_clip = subtitle_clip.with_fps(video_clip.fps or 24)
@@ -222,7 +310,8 @@ def render_subtitles(video_clip: VideoClip, word_timestamps: list[dict],
     def make_subtitle_frame(t):
         for phrase in phrases:
             if phrase["start"] <= t <= phrase["end"]:
-                return renderer(phrase["text"], target_size)
+                opacity = _compute_phrase_opacity(t, phrase["start"], phrase["end"])
+                return renderer(phrase["text"], target_size, opacity)
         # No active phrase → fully transparent frame (height, width, RGBA)
         return np.zeros((target_size[1], target_size[0], 4), dtype=np.uint8)
 
