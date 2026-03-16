@@ -23,6 +23,7 @@ from moviepy import (
     VideoFileClip,
     concatenate_videoclips,
 )
+from moviepy.video.fx import TimeMirror
 
 # ── Constants ────────────────────────────────────────────────────────────────
 GROK_CLIP_DURATION = 6.0          # seconds – canonical Grok clip length
@@ -52,6 +53,11 @@ def _slow_mo_clip(clip: VideoFileClip, target_dur: float) -> VideoFileClip:
     return clip.with_speed_scaled(speed_factor)
 
 
+def _reverse_clip(clip: VideoFileClip) -> VideoFileClip:
+    """Return a time-reversed copy of *clip* (plays backward)."""
+    return clip.with_effects([TimeMirror()])
+
+
 def _loop_and_freeze_clip(clip: VideoFileClip, target_dur: float) -> VideoFileClip:
     """Fill *target_dur* by looping the clip with alternating direction
     (ping-pong) and freezing the last frame for any remaining time.
@@ -66,12 +72,12 @@ def _loop_and_freeze_clip(clip: VideoFileClip, target_dur: float) -> VideoFileCl
 
     while remaining > 0:
         if remaining >= clip_dur:
-            seg = clip.copy() if forward else clip.time_mirror()
+            seg = clip.copy() if forward else _reverse_clip(clip)
             segments.append(seg)
             remaining -= clip_dur
         else:
             # Partial segment – slow-mo the remainder so it still looks smooth
-            seg = clip.copy() if forward else clip.time_mirror()
+            seg = clip.copy() if forward else _reverse_clip(clip)
             speed = clip_dur / remaining
             seg = seg.with_speed_scaled(speed)
             segments.append(seg)

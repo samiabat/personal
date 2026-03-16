@@ -500,7 +500,7 @@ function App() {
 
   const v5AllVideosUploaded = () => {
     if (videoVersion !== 'v5') return true
-    return reviewAssets.length > 0 && reviewAssets.every(a => a.has_video || v5UploadedVideos[a.scene_index])
+    return reviewAssets.length > 0 && reviewAssets.every((a, i) => a.has_video || v5UploadedVideos[i])
   }
 
   const prepareVideo = async () => {
