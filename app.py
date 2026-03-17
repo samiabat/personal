@@ -55,14 +55,28 @@ class V5Scene(BaseModel):
     time_fit_strategy: str = "auto"  # "auto", "trim", "cinematic_slow_mo", "loop_or_freeze"
 
 
+class V6Scene(BaseModel):
+    voiceover: str
+    prompt: str
+    media_type: str = "image"          # "image" or "video"
+    # Image-scene options
+    zoom_effect: str = "zoom_in"       # "none", "zoom_in", "zoom_out", "ken_burns"
+    focus_x: float = 0.5              # zoom focus point (0–1)
+    focus_y: float = 0.5
+    # Video-scene options
+    time_fit_strategy: str = "auto"   # "auto", "trim", "cinematic_slow_mo", "loop_or_freeze"
+
+
 class VideoRequest(BaseModel):
-    version: str = "v1"  # "v1", "v2", "v3", or "v5"
+    version: str = "v1"  # "v1", "v2", "v3", "v5", or "v6"
     # V1 fields
     scenes: list[Scene] = []
     # V2/V3 fields
     v2_scenes: list[V2Scene] = []
     # V5 fields
     v5_scenes: list[V5Scene] = []
+    # V6 fields
+    v6_scenes: list[V6Scene] = []
     # Common fields
     speech_provider: str = "google"  # "google" or "openai"
     speech_model: str = "gemini-2.5-pro-preview-tts"
@@ -664,6 +678,128 @@ def run_v5_video_assembly(job_id: str, request: VideoRequest):
         job["progress"] = job.get("progress", 0)
 
 
+# ── V6 pipeline ─────────────────────────────────────────────────────────────
+
+def run_v6_asset_generation(job_id: str, request: VideoRequest):
+    """Background task: generate TTS audio + AI images for every V6 scene.
+
+    For *image* scenes both audio and an AI image are generated.
+    For *video* scenes only the TTS audio is generated; the user uploads
+    the video clip via the Asset Dashboard.
+    """
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+
+    total = len(request.v6_scenes)
+
+    try:
+        for idx, scene in enumerate(request.v6_scenes):
+            job["status"] = "processing"
+
+            # ── TTS audio ──
+            audio_path = f"{job_dir}/v6_scene_{idx}_audio.wav"
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                job["message"] = f"V6 Scene {idx + 1}/{total}: Audio exists, skipping..."
+            else:
+                job["message"] = f"V6 Scene {idx + 1}/{total}: Generating voiceover..."
+                if request.speech_provider == "openai":
+                    from openai_services import generate_audio_openai
+                    generate_audio_openai(
+                        scene.voiceover, audio_path,
+                        model=request.speech_model,
+                        voice=request.speech_voice,
+                        api_key=request.openai_api_key or "",
+                    )
+                else:
+                    from gemini_services import generate_audio
+                    generate_audio(
+                        scene.voiceover, audio_path,
+                        model=request.speech_model,
+                        voice=request.speech_voice,
+                        api_key=request.gemini_api_key or "",
+                    )
+
+            # ── AI image (image scenes only) ──
+            if scene.media_type == "image":
+                image_path = f"{job_dir}/v6_scene_{idx}_image.jpg"
+                if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+                    job["message"] = f"V6 Scene {idx + 1}/{total}: Image exists, skipping..."
+                else:
+                    job["message"] = f"V6 Scene {idx + 1}/{total}: Generating image..."
+                    _generate_image_for_provider(
+                        request.image_provider, scene.prompt, image_path,
+                        image_model=request.image_model,
+                        aspect_ratio=request.aspect_ratio,
+                        image_size=request.image_size,
+                        openai_image_size=request.openai_image_size,
+                        togetherai_width=request.togetherai_width,
+                        togetherai_height=request.togetherai_height,
+                        gemini_api_key=request.gemini_api_key or "",
+                        openai_api_key=request.openai_api_key or "",
+                        together_api_key=request.together_api_key or "",
+                    )
+
+            job["progress"] = int(((idx + 1) / total) * 100)
+
+        job["progress"] = 100
+        job["status"] = "assets_ready"
+        job["message"] = "V6 assets generated! Upload video clips for video scenes, then continue."
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
+def run_v6_video_assembly(job_id: str, request: VideoRequest):
+    """Background task: assemble V6 video from image/video scenes + TTS audio."""
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+
+    try:
+        job["progress"] = 5
+        job["status"] = "processing"
+        job["message"] = "V6: Assembling hybrid video..."
+
+        from v6_editor import assemble_v6_video
+
+        scene_dicts = [s.model_dump() for s in request.v6_scenes]
+        output_path = assemble_v6_video(
+            scene_dicts,
+            job_dir,
+            output_filename="output.mp4",
+            resolution=request.resolution,
+            orientation=request.orientation,
+            enable_subtitles=request.enable_subtitles,
+            subtitle_style=request.subtitle_style,
+        )
+
+        # Clean up temp files
+        job["progress"] = 90
+        job["message"] = "Cleaning up temporary files..."
+        for idx, scene in enumerate(request.v6_scenes):
+            audio_p = f"{job_dir}/v6_scene_{idx}_audio.wav"
+            if os.path.exists(audio_p):
+                os.remove(audio_p)
+            image_p = f"{job_dir}/v6_scene_{idx}_image.jpg"
+            if os.path.exists(image_p):
+                os.remove(image_p)
+            video_p = f"{job_dir}/v6_scene_{idx}_video.mp4"
+            if os.path.exists(video_p):
+                os.remove(video_p)
+
+        job["progress"] = 100
+        job["status"] = "completed"
+        job["message"] = "V6 video generation completed!"
+        job["output_path"] = output_path
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
 @app.post("/api/generate-video")
 async def generate_video(request: VideoRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
@@ -681,6 +817,8 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
         background_tasks.add_task(run_v3_video_generation, job_id, request)
     elif request.version == "v5":
         background_tasks.add_task(run_v5_tts_generation, job_id, request)
+    elif request.version == "v6":
+        background_tasks.add_task(run_v6_asset_generation, job_id, request)
     else:
         background_tasks.add_task(run_video_generation, job_id, request)
     return {"job_id": job_id}
@@ -706,6 +844,8 @@ async def retry_job(job_id: str, background_tasks: BackgroundTasks):
 
     if request.version == "v5":
         background_tasks.add_task(run_v5_tts_generation, job_id, request)
+    elif request.version == "v6":
+        background_tasks.add_task(run_v6_asset_generation, job_id, request)
     elif request.version == "v3":
         background_tasks.add_task(run_v3_video_generation, job_id, request)
     elif request.version == "v2":
@@ -729,6 +869,8 @@ async def generate_assets(request: VideoRequest, background_tasks: BackgroundTas
     }
     if request.version == "v5":
         background_tasks.add_task(run_v5_tts_generation, job_id, request)
+    elif request.version == "v6":
+        background_tasks.add_task(run_v6_asset_generation, job_id, request)
     elif request.version in ("v2", "v3"):
         background_tasks.add_task(run_v2_asset_generation, job_id, request)
     else:
@@ -749,6 +891,39 @@ async def get_job_assets(job_id: str):
     job_dir = f"{JOBS_DIR}/{job_id}"
 
     version = request_data.get("version", "v1")
+
+    if version == "v6":
+        assets = []
+        for s_idx, scene in enumerate(request_data.get("v6_scenes", [])):
+            audio_path = f"{job_dir}/v6_scene_{s_idx}_audio.wav"
+            media_type = scene.get("media_type", "image")
+            asset = {
+                "scene_index": s_idx,
+                "voiceover": scene["voiceover"],
+                "prompt": scene.get("prompt", ""),
+                "media_type": media_type,
+                "zoom_effect": scene.get("zoom_effect", "zoom_in"),
+                "focus_x": scene.get("focus_x", 0.5),
+                "focus_y": scene.get("focus_y", 0.5),
+                "time_fit_strategy": scene.get("time_fit_strategy", "auto"),
+                "has_audio": os.path.exists(audio_path) and os.path.getsize(audio_path) > 0,
+                "audio_url": f"/api/v6-scene-audio/{job_id}/{s_idx}",
+            }
+            if media_type == "image":
+                image_path = f"{job_dir}/v6_scene_{s_idx}_image.jpg"
+                asset["has_image"] = os.path.exists(image_path) and os.path.getsize(image_path) > 0
+                asset["image_url"] = f"/api/v6-scene-image/{job_id}/{s_idx}"
+                asset["has_video"] = False
+                asset["video_url"] = ""
+            else:
+                video_path = f"{job_dir}/v6_scene_{s_idx}_video.mp4"
+                asset["has_image"] = False
+                asset["image_url"] = ""
+                asset["has_video"] = os.path.exists(video_path) and os.path.getsize(video_path) > 0
+                asset["video_url"] = f"/api/v6-scene-video/{job_id}/{s_idx}"
+            assets.append(asset)
+        total = len(request_data.get("v6_scenes", []))
+        return {"job_id": job_id, "version": "v6", "total_scenes": total, "assets": assets}
 
     if version == "v5":
         assets = []
@@ -850,6 +1025,8 @@ async def get_scene_audio(job_id: str, scene_index: int):
     version = job["request"].get("version", "v1")
     if version == "v5":
         audio_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_audio.wav"
+    elif version == "v6":
+        audio_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_audio.wav"
     elif version in ("v2", "v3"):
         audio_path = f"{JOBS_DIR}/{job_id}/v2_scene_{scene_index}_audio.wav"
     else:
@@ -1010,6 +1187,8 @@ async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
 
     if request.version == "v5":
         background_tasks.add_task(run_v5_video_assembly, job_id, request)
+    elif request.version == "v6":
+        background_tasks.add_task(run_v6_video_assembly, job_id, request)
     elif request.version == "v3":
         background_tasks.add_task(run_v3_video_assembly, job_id, request)
     elif request.version == "v2":
@@ -1155,6 +1334,162 @@ async def v5_dashboard_status(job_id: str):
         })
 
     return {"all_ready": all_ready, "scenes": scene_status}
+
+
+# ── V6 asset endpoints ───────────────────────────────────────────────────────
+
+@app.get("/api/v6-scene-image/{job_id}/{scene_index}")
+async def get_v6_scene_image(job_id: str, scene_index: int):
+    """Serve a generated image for a V6 image scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    image_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_image.jpg"
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(
+        image_path, media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
+
+
+@app.get("/api/v6-scene-audio/{job_id}/{scene_index}")
+async def get_v6_scene_audio(job_id: str, scene_index: int):
+    """Serve the TTS audio for a V6 scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    audio_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_audio.wav"
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return FileResponse(audio_path, media_type="audio/wav")
+
+
+@app.get("/api/v6-scene-video/{job_id}/{scene_index}")
+async def get_v6_scene_video(job_id: str, scene_index: int):
+    """Serve an uploaded video clip for a V6 video scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    video_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_video.mp4"
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(
+        video_path, media_type="video/mp4",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
+
+
+@app.post("/api/v6-upload-video/{job_id}/{scene_index}")
+async def v6_upload_video(job_id: str, scene_index: int, file: UploadFile = File(...)):
+    """Upload a video clip for a specific V6 video scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    version = job["request"].get("version", "v1")
+    if version != "v6":
+        raise HTTPException(status_code=400, detail="This endpoint is only for V6 jobs")
+
+    v6_scenes = job["request"].get("v6_scenes", [])
+    if scene_index < 0 or scene_index >= len(v6_scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+
+    scene = v6_scenes[scene_index]
+    if scene.get("media_type", "image") != "video":
+        raise HTTPException(status_code=400, detail="Scene is not a video scene")
+
+    if not file.filename or not file.filename.lower().endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="Only .mp4 files are accepted")
+
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+    video_path = f"{job_dir}/v6_scene_{scene_index}_video.mp4"
+
+    try:
+        contents = await file.read()
+        with open(video_path, "wb") as f:
+            f.write(contents)
+        return {
+            "success": True,
+            "message": f"Video uploaded for V6 scene {scene_index + 1}",
+            "video_url": f"/api/v6-scene-video/{job_id}/{scene_index}",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class V6FocusPointUpdate(BaseModel):
+    scene_index: int
+    focus_x: float
+    focus_y: float
+    zoom_effect: Optional[str] = None
+
+
+@app.post("/api/v6-update-scene/{job_id}")
+async def v6_update_scene(job_id: str, update: V6FocusPointUpdate):
+    """Save focus point and optional zoom effect for a V6 image scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+
+    v6_scenes = job["request"].get("v6_scenes", [])
+    if update.scene_index < 0 or update.scene_index >= len(v6_scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+
+    fx = max(0.0, min(1.0, update.focus_x))
+    fy = max(0.0, min(1.0, update.focus_y))
+    v6_scenes[update.scene_index]["focus_x"] = fx
+    v6_scenes[update.scene_index]["focus_y"] = fy
+    if update.zoom_effect is not None:
+        v6_scenes[update.scene_index]["zoom_effect"] = update.zoom_effect
+    return {
+        "success": True,
+        "focus_x": fx,
+        "focus_y": fy,
+        "zoom_effect": v6_scenes[update.scene_index].get("zoom_effect"),
+    }
+
+
+@app.post("/api/v6-regenerate-image/{job_id}/{scene_index}")
+async def v6_regenerate_image(job_id: str, scene_index: int):
+    """Regenerate the AI image for a specific V6 image scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    if job["status"] != "assets_ready":
+        raise HTTPException(status_code=400, detail="Assets not ready for regeneration")
+
+    request_data = job["request"]
+    v6_scenes = request_data.get("v6_scenes", [])
+    if scene_index < 0 or scene_index >= len(v6_scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+    scene = v6_scenes[scene_index]
+    if scene.get("media_type", "image") != "image":
+        raise HTTPException(status_code=400, detail="Scene is not an image scene")
+
+    image_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_image.jpg"
+    if os.path.exists(image_path):
+        os.remove(image_path)
+
+    try:
+        _generate_image_for_provider(
+            request_data.get("image_provider", "gemini"),
+            scene["prompt"],
+            image_path,
+            image_model=request_data.get("image_model", "gemini-3.1-flash-image-preview"),
+            aspect_ratio=request_data.get("aspect_ratio", "16:9"),
+            image_size=request_data.get("image_size", "512"),
+            openai_image_size=request_data.get("openai_image_size", "1024x1024"),
+            togetherai_width=request_data.get("togetherai_width", 1024),
+            togetherai_height=request_data.get("togetherai_height", 576),
+            gemini_api_key=request_data.get("gemini_api_key", ""),
+            openai_api_key=request_data.get("openai_api_key", ""),
+            together_api_key=request_data.get("together_api_key", ""),
+        )
+        if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+            return {"success": True, "message": f"V6 image for scene {scene_index + 1} regenerated"}
+        raise HTTPException(status_code=500, detail="Image regeneration failed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/test-audio")

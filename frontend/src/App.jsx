@@ -47,6 +47,29 @@ const DEFAULT_V5_SCENES_EXAMPLE = `[
   }
 ]`
 
+const DEFAULT_V6_SCENES_EXAMPLE = `[
+  {
+    "voiceover": "The ancient forest stood still as morning mist rolled through the towering trees.",
+    "prompt": "Cinematic wide shot of an ancient misty forest at dawn, golden light filtering through giant trees, ethereal atmosphere, 8K.",
+    "media_type": "image",
+    "zoom_effect": "zoom_in",
+    "focus_x": 0.5,
+    "focus_y": 0.4
+  },
+  {
+    "voiceover": "A lone figure emerged from the shadows, carrying secrets older than the stones.",
+    "prompt": "Ghibli anime style. A mysterious cloaked figure walking through an ancient forest path. Cinematic motion, golden hour.",
+    "media_type": "video",
+    "time_fit_strategy": "auto"
+  },
+  {
+    "voiceover": "And at last, the hidden valley revealed its breathtaking splendour.",
+    "prompt": "Epic fantasy landscape of a hidden valley full of flowers and waterfalls, dramatic lighting, ultra-detailed, 8K cinematic.",
+    "media_type": "image",
+    "zoom_effect": "ken_burns"
+  }
+]`
+
 function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [models, setModels] = useState(null)
@@ -60,7 +83,7 @@ function App() {
 
   // Generation settings
   const [scenesText, setScenesText] = useState('')
-  const [videoVersion, setVideoVersion] = useState('v1') // 'v1', 'v2', 'v3', or 'v5'
+  const [videoVersion, setVideoVersion] = useState('v1') // 'v1', 'v2', 'v3', 'v5', or 'v6'
   const [speechProvider, setSpeechProvider] = useState('google')
   const [speechModel, setSpeechModel] = useState('gemini-2.5-pro-preview-tts')
   const [customSpeechModel, setCustomSpeechModel] = useState('')
@@ -109,6 +132,16 @@ function App() {
   const [v5UploadedVideos, setV5UploadedVideos] = useState({}) // { sceneIndex: true }
   const [v5Uploading, setV5Uploading] = useState(null) // scene index currently uploading
   const [v5CopiedIndex, setV5CopiedIndex] = useState(null) // scene index whose prompt was copied
+
+  // V6 Asset Dashboard
+  const [v6UploadedVideos, setV6UploadedVideos] = useState({}) // { sceneIndex: true } for video scenes
+  const [v6Uploading, setV6Uploading] = useState(null) // scene index currently uploading
+  const [v6CopiedIndex, setV6CopiedIndex] = useState(null) // scene index whose prompt was copied
+  const [v6RegeneratingIndex, setV6RegeneratingIndex] = useState(null) // image scene being regenerated
+  // V6 Director mode: pick focus point on image scenes
+  const [v6DirectorSceneIndex, setV6DirectorSceneIndex] = useState(null) // which image scene we are editing
+  const [v6DirectorFocus, setV6DirectorFocus] = useState({}) // { sceneIndex: {x, y} }
+  const [v6DirectorZoom, setV6DirectorZoom] = useState({}) // { sceneIndex: zoomEffect }
 
   // Test panel
   const [testAudioText, setTestAudioText] = useState('Hello! This is a test of the text to speech system.')
@@ -198,6 +231,16 @@ function App() {
         for (const s of parsed) {
           if (!s.voiceover) return { valid: false, count: parsed.length, error: 'Each V5 scene needs "voiceover"' }
           if (!s.prompt) return { valid: false, count: parsed.length, error: 'Each V5 scene needs "prompt"' }
+        }
+        return { valid: true, count: parsed.length, error: null }
+      }
+
+      if (videoVersion === 'v6') {
+        for (const s of parsed) {
+          if (!s.voiceover) return { valid: false, count: parsed.length, error: 'Each V6 scene needs "voiceover"' }
+          if (!s.prompt) return { valid: false, count: parsed.length, error: 'Each V6 scene needs "prompt"' }
+          const mt = s.media_type || 'image'
+          if (mt !== 'image' && mt !== 'video') return { valid: false, count: parsed.length, error: 'media_type must be "image" or "video"' }
         }
         return { valid: true, count: parsed.length, error: null }
       }
@@ -343,6 +386,10 @@ function App() {
     setDirectorReviewIndex(0)
     setDirectorFocus(null)
     setDirectorReviewDone(false)
+    setV6UploadedVideos({})
+    setV6DirectorSceneIndex(null)
+    setV6DirectorFocus({})
+    setV6DirectorZoom({})
 
     const togDims = getTogetheraiDimensions()
     const parsedScenes = JSON.parse(scenesText)
@@ -372,6 +419,8 @@ function App() {
 
     if (videoVersion === 'v5') {
       body.v5_scenes = parsedScenes
+    } else if (videoVersion === 'v6') {
+      body.v6_scenes = parsedScenes
     } else if (videoVersion === 'v2' || videoVersion === 'v3') {
       body.v2_scenes = parsedScenes
     } else {
@@ -501,6 +550,101 @@ function App() {
   const v5AllVideosUploaded = () => {
     if (videoVersion !== 'v5') return true
     return reviewAssets.length > 0 && reviewAssets.every((a, i) => a.has_video || v5UploadedVideos[i])
+  }
+
+  // ── V6 Asset Dashboard helpers ──
+
+  const v6CopyPrompt = async (prompt, sceneIndex) => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setV6CopiedIndex(sceneIndex)
+      setTimeout(() => setV6CopiedIndex(null), 2000)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = prompt
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      setV6CopiedIndex(sceneIndex)
+      setTimeout(() => setV6CopiedIndex(null), 2000)
+    }
+  }
+
+  const v6UploadVideo = async (sceneIndex, file) => {
+    if (!jobId || !file) return
+    setV6Uploading(sceneIndex)
+    setError('')
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch(`${API_BASE}/v6-upload-video/${jobId}/${sceneIndex}`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Upload failed')
+      }
+      setV6UploadedVideos(prev => ({ ...prev, [sceneIndex]: true }))
+      setReviewAssets(prev => prev.map((a, i) =>
+        i === sceneIndex ? { ...a, has_video: true, video_url: `${API_BASE}/v6-scene-video/${jobId}/${sceneIndex}?t=${Date.now()}` } : a
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setV6Uploading(null)
+    }
+  }
+
+  const v6RegenerateImage = async (sceneIndex) => {
+    if (!jobId) return
+    setV6RegeneratingIndex(sceneIndex)
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE}/v6-regenerate-image/${jobId}/${sceneIndex}`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Regeneration failed')
+      }
+      setReviewAssets(prev => prev.map((a, i) =>
+        i === sceneIndex ? { ...a, image_url: `${API_BASE}/v6-scene-image/${jobId}/${sceneIndex}?t=${Date.now()}` } : a
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setV6RegeneratingIndex(null)
+    }
+  }
+
+  const v6SaveFocusPoint = async (sceneIndex, x, y, zoomEffect) => {
+    if (!jobId) return
+    try {
+      const body = { scene_index: sceneIndex, focus_x: x, focus_y: y }
+      if (zoomEffect !== undefined) body.zoom_effect = zoomEffect
+      await fetch(`${API_BASE}/v6-update-scene/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      setV6DirectorFocus(prev => ({ ...prev, [sceneIndex]: { x, y } }))
+      if (zoomEffect !== undefined) {
+        setV6DirectorZoom(prev => ({ ...prev, [sceneIndex]: zoomEffect }))
+        setReviewAssets(prev => prev.map((a, i) =>
+          i === sceneIndex ? { ...a, zoom_effect: zoomEffect, focus_x: x, focus_y: y } : a
+        ))
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const v6AllVideoScenesUploaded = () => {
+    if (videoVersion !== 'v6') return true
+    return reviewAssets.length > 0 && reviewAssets.every((a, i) => {
+      if (a.media_type !== 'video') return true
+      return a.has_video || v6UploadedVideos[i]
+    })
   }
 
   const prepareVideo = async () => {
@@ -1236,6 +1380,13 @@ function App() {
                     >
                       V5
                     </button>
+                    <button
+                      className={`btn btn-sm ${videoVersion === 'v6' ? 'btn-primary' : 'btn-ghost'}`}
+                      onClick={() => { setVideoVersion('v6'); setScenesText(''); setV6UploadedVideos({}); setV6CopiedIndex(null); setV6DirectorSceneIndex(null); setV6DirectorFocus({}); setV6DirectorZoom({}) }}
+                      style={{ borderRadius: '0.4rem', minWidth: '3rem' }}
+                    >
+                      V6
+                    </button>
                   </div>
                   {videoVersion === 'v1' && (
                     <>
@@ -1255,6 +1406,11 @@ function App() {
                   {videoVersion === 'v5' && (
                     <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_V5_SCENES_EXAMPLE)}>
                       Load V5 Example
+                    </button>
+                  )}
+                  {videoVersion === 'v6' && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => setScenesText(DEFAULT_V6_SCENES_EXAMPLE)}>
+                      Load V6 Example
                     </button>
                   )}
                 </div>
@@ -1318,6 +1474,31 @@ function App() {
                 </div>
               )}
 
+              {videoVersion === 'v6' && (
+                <div className="v6-info-banner" style={{
+                  background: 'linear-gradient(135deg, rgba(168,85,247,0.12), rgba(236,72,153,0.08))',
+                  border: '1px solid rgba(168,85,247,0.3)',
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                  fontSize: '0.85rem',
+                  color: darkMode ? '#d8b4fe' : '#7c3aed',
+                }}>
+                  <strong>✨ V6 Hybrid Mode:</strong> Mix AI-generated image scenes and video clip scenes in one video.
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Image scenes</strong> — AI generates the image; you choose a zoom effect and optionally click a focus point.
+                    Effects: <code>none</code> (static), <code>zoom_in</code> (default), <code>zoom_out</code>, <code>ken_burns</code>.
+                  </div>
+                  <div style={{ marginTop: '0.25rem', fontSize: '0.8rem', lineHeight: '1.5' }}>
+                    <strong>Video scenes</strong> — Upload a clip (e.g. from Grok); it is automatically time-fitted to match the voiceover.
+                    Strategies: <code>auto</code>, <code>trim</code>, <code>cinematic_slow_mo</code>, <code>loop_or_freeze</code>.
+                  </div>
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', lineHeight: '1.5', borderTop: '1px solid rgba(168,85,247,0.2)', paddingTop: '0.4rem' }}>
+                    🎯 <strong>After asset generation</strong> you can set a custom zoom focus point on each image scene by clicking on the image.
+                  </div>
+                </div>
+              )}
+
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
                   <label style={{ margin: 0 }}>Paste your scenes JSON array below</label>
@@ -1329,12 +1510,19 @@ function App() {
                 </div>
                 <textarea
                   className="scene-editor"
-                  placeholder={videoVersion === 'v5' ? DEFAULT_V5_SCENES_EXAMPLE : (videoVersion === 'v2' || videoVersion === 'v3') ? DEFAULT_V2_SCENES_EXAMPLE : DEFAULT_SCENES_EXAMPLE}
+                  placeholder={
+                    videoVersion === 'v6' ? DEFAULT_V6_SCENES_EXAMPLE :
+                    videoVersion === 'v5' ? DEFAULT_V5_SCENES_EXAMPLE :
+                    (videoVersion === 'v2' || videoVersion === 'v3') ? DEFAULT_V2_SCENES_EXAMPLE :
+                    DEFAULT_SCENES_EXAMPLE
+                  }
                   value={scenesText}
                   onChange={e => setScenesText(e.target.value)}
                 />
                 <p className="help-text">
-                  {videoVersion === 'v5'
+                  {videoVersion === 'v6'
+                    ? 'Each V6 scene needs "voiceover", "prompt", and "media_type" ("image" or "video"). Image scenes support "zoom_effect" and "focus_x"/"focus_y". Video scenes support "time_fit_strategy".'
+                    : videoVersion === 'v5'
                     ? 'Each V5 scene needs "voiceover", "prompt", and optionally "media_type" and "time_fit_strategy".'
                     : (videoVersion === 'v2' || videoVersion === 'v3')
                     ? `Each ${videoVersion.toUpperCase()} scene needs "voiceover", "prompts" (array), and "visual_beats" (array with trigger_word, effect, image_index).`
@@ -1354,14 +1542,14 @@ function App() {
               <div className="workflow-stepper">
                 <div className={`workflow-step ${workflowStep >= 1 ? 'active' : ''} ${workflowStep > 1 ? 'completed' : ''}`}>
                   <div className="step-number">{workflowStep > 1 ? '✓' : '1'}</div>
-                  <div className="step-label">{videoVersion === 'v5' ? 'Generate Voiceover' : 'Generate Audio & Images'}</div>
+                  <div className="step-label">{(videoVersion === 'v5' || videoVersion === 'v6') ? 'Generate Assets' : 'Generate Audio & Images'}</div>
                 </div>
                 <div className={`step-connector ${workflowStep > 1 ? 'active' : ''}`}>
                   <span className="step-arrow">→</span>
                 </div>
                 <div className={`workflow-step ${workflowStep >= 2 ? 'active' : ''} ${workflowStep > 2 ? 'completed' : ''}`}>
                   <div className="step-number">{workflowStep > 2 ? '✓' : '2'}</div>
-                  <div className="step-label">{videoVersion === 'v5' ? 'Upload Video Clips' : 'Review Resources'}</div>
+                  <div className="step-label">{videoVersion === 'v5' ? 'Upload Video Clips' : videoVersion === 'v6' ? 'Review & Configure' : 'Review Resources'}</div>
                 </div>
                 <div className={`step-connector ${workflowStep > 2 ? 'active' : ''}`}>
                   <span className="step-arrow">→</span>
@@ -1380,11 +1568,13 @@ function App() {
                     disabled={!sceneInfo.valid || isGenerating}
                     onClick={startGeneration}
                   >
-                    {videoVersion === 'v5' ? '🎙️ Generate Voiceover Audio' : '🎙️🖼️ Generate Audio & Images'}
+                    {videoVersion === 'v5' ? '🎙️ Generate Voiceover Audio' : videoVersion === 'v6' ? '✨ Generate V6 Assets' : '🎙️🖼️ Generate Audio & Images'}
                   </button>
                   <p className="help-text" style={{ textAlign: 'center', marginTop: '0.5rem' }}>
                     {videoVersion === 'v5'
                       ? 'This will generate TTS voiceover audio for all scenes. You will then upload video clips for each scene.'
+                      : videoVersion === 'v6'
+                      ? 'This will generate TTS audio for all scenes and AI images for image scenes. Video scenes will need clip uploads.'
                       : 'This will generate voiceover audio and images for all scenes. You can review them before creating the video.'}
                   </p>
                 </div>
@@ -1419,15 +1609,183 @@ function App() {
               {workflowStep === 2 && (
                 <div className="workflow-action">
                   <div className="review-header">
-                    <h3>{videoVersion === 'v5' ? '🎬 V5 Asset Dashboard' : '📋 Review Generated Resources'}</h3>
+                    <h3>{videoVersion === 'v6' ? '✨ V6 Asset Dashboard' : videoVersion === 'v5' ? '🎬 V5 Asset Dashboard' : '📋 Review Generated Resources'}</h3>
                     <p className="muted">
-                      {videoVersion === 'v5'
+                      {videoVersion === 'v6'
+                        ? 'Review images and set zoom effects for image scenes. Upload video clips for video scenes.'
+                        : videoVersion === 'v5'
                         ? 'Copy each prompt, generate a 6-second video clip in Grok, then upload the .mp4 file for each scene.'
                         : 'Check each image below. Click "Regenerate" on any image that doesn\'t look right.'}
                     </p>
                   </div>
 
-                  {videoVersion === 'v5' ? (
+                  {videoVersion === 'v6' ? (
+                    /* V6 Asset Dashboard: image scenes + video scenes */
+                    <div className="review-grid" style={{ gridTemplateColumns: '1fr' }}>
+                      {reviewAssets.map((asset, idx) => {
+                        const isImageScene = asset.media_type !== 'video'
+                        const isVideoReady = !isImageScene && (asset.has_video || v6UploadedVideos[idx])
+                        const isImageReady = isImageScene && asset.has_image
+                        const isReady = isImageScene ? isImageReady : isVideoReady
+                        const currentFocus = v6DirectorFocus[idx] || { x: asset.focus_x || 0.5, y: asset.focus_y || 0.5 }
+                        const currentZoom = v6DirectorZoom[idx] || asset.zoom_effect || 'zoom_in'
+                        const isEditingFocus = v6DirectorSceneIndex === idx
+
+                        return (
+                          <div key={idx} className="review-card" style={{
+                            gridColumn: '1 / -1',
+                            border: isReady ? '2px solid rgba(168,85,247,0.45)' : '2px solid rgba(245,158,11,0.3)',
+                            background: isReady ? 'rgba(168,85,247,0.05)' : 'rgba(245,158,11,0.03)',
+                          }}>
+                            <div className="review-card-header" style={{ marginBottom: '0.75rem' }}>
+                              <span className="review-scene-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                {isReady ? '✅' : '⏳'} Scene {idx + 1}
+                                <code style={{ fontSize: '0.7rem', opacity: 0.7, padding: '0.1rem 0.4rem', background: isImageScene ? 'rgba(168,85,247,0.15)' : 'rgba(16,185,129,0.15)', borderRadius: '0.25rem' }}>
+                                  {isImageScene ? '🖼 image' : '🎬 video'}
+                                </code>
+                                {isImageScene && (
+                                  <code style={{ fontSize: '0.7rem', opacity: 0.7, padding: '0.1rem 0.4rem', background: 'rgba(99,102,241,0.15)', borderRadius: '0.25rem' }}>
+                                    {currentZoom}
+                                  </code>
+                                )}
+                              </span>
+                            </div>
+
+                            {/* Voiceover */}
+                            <div style={{ marginBottom: '0.75rem' }}>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Voiceover</div>
+                              <p style={{ fontSize: '0.9rem', lineHeight: '1.6', margin: 0, fontStyle: 'italic' }}>
+                                &ldquo;{asset.voiceover}&rdquo;
+                              </p>
+                            </div>
+
+                            {/* Audio */}
+                            {asset.has_audio && (
+                              <audio controls src={asset.audio_url} style={{ width: '100%', marginBottom: '0.75rem' }} />
+                            )}
+
+                            {/* Prompt */}
+                            <div style={{ background: darkMode ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)', borderRadius: '0.5rem', padding: '0.75rem', marginBottom: '0.75rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Visual Prompt</div>
+                                  <p style={{ fontSize: '0.85rem', lineHeight: '1.5', margin: 0 }}>{asset.prompt}</p>
+                                </div>
+                                {!isImageScene && (
+                                  <button className="btn btn-secondary btn-sm" onClick={() => v6CopyPrompt(asset.prompt, idx)} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                    {v6CopiedIndex === idx ? '✅ Copied!' : '📋 Copy Prompt'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Image scene: show image + zoom controls */}
+                            {isImageScene && (
+                              <div>
+                                {asset.has_image ? (
+                                  <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generated Image</div>
+                                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                        <select
+                                          value={currentZoom}
+                                          onChange={e => v6SaveFocusPoint(idx, currentFocus.x, currentFocus.y, e.target.value)}
+                                          style={{ fontSize: '0.75rem', padding: '0.2rem 0.4rem', borderRadius: '0.3rem', border: '1px solid rgba(168,85,247,0.3)', background: darkMode ? '#1e1e2e' : '#fff', color: 'inherit' }}
+                                        >
+                                          <option value="none">🖼 Static (none)</option>
+                                          <option value="zoom_in">🔍 Zoom In</option>
+                                          <option value="zoom_out">🔎 Zoom Out</option>
+                                          <option value="ken_burns">🎥 Ken Burns</option>
+                                        </select>
+                                        <button
+                                          className={`btn btn-sm ${isEditingFocus ? 'btn-primary' : 'btn-secondary'}`}
+                                          onClick={() => setV6DirectorSceneIndex(isEditingFocus ? null : idx)}
+                                          title="Click to set zoom focus point on image"
+                                          style={{ fontSize: '0.75rem' }}
+                                        >
+                                          {isEditingFocus ? '✅ Done' : '🎯 Set Focus'}
+                                        </button>
+                                        <button
+                                          className="btn btn-secondary btn-sm"
+                                          disabled={v6RegeneratingIndex === idx}
+                                          onClick={() => v6RegenerateImage(idx)}
+                                          style={{ fontSize: '0.75rem' }}
+                                        >
+                                          {v6RegeneratingIndex === idx ? <><span className="spinner"></span></> : '🔄'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div
+                                      style={{ position: 'relative', cursor: isEditingFocus ? 'crosshair' : 'default', borderRadius: '0.5rem', overflow: 'hidden', border: isEditingFocus ? '2px solid rgba(168,85,247,0.6)' : '1px solid rgba(168,85,247,0.2)', display: 'inline-block', maxWidth: '100%', width: '100%' }}
+                                      onClick={isEditingFocus ? (e) => {
+                                        const rect = e.currentTarget.getBoundingClientRect()
+                                        const x = Math.round(((e.clientX - rect.left) / rect.width) * 100) / 100
+                                        const y = Math.round(((e.clientY - rect.top) / rect.height) * 100) / 100
+                                        v6SaveFocusPoint(idx, x, y, currentZoom)
+                                      } : undefined}
+                                    >
+                                      <img src={asset.image_url} alt={`V6 Scene ${idx + 1}`} style={{ width: '100%', display: 'block' }} />
+                                      {isEditingFocus && (
+                                        <div style={{
+                                          position: 'absolute',
+                                          left: `${currentFocus.x * 100}%`,
+                                          top: `${currentFocus.y * 100}%`,
+                                          transform: 'translate(-50%, -50%)',
+                                          width: '20px',
+                                          height: '20px',
+                                          borderRadius: '50%',
+                                          border: '3px solid #a855f7',
+                                          background: 'rgba(168,85,247,0.4)',
+                                          pointerEvents: 'none',
+                                          boxShadow: '0 0 0 2px #fff',
+                                        }} />
+                                      )}
+                                    </div>
+                                    {isEditingFocus && (
+                                      <p style={{ fontSize: '0.75rem', opacity: 0.65, marginTop: '0.4rem', textAlign: 'center' }}>
+                                        Click on the image to set the zoom focus point. Current: ({Math.round(currentFocus.x * 100)}%, {Math.round(currentFocus.y * 100)}%)
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div style={{ padding: '1rem', textAlign: 'center', opacity: 0.6, fontSize: '0.85rem' }}>⏳ Image generating…</div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Video scene: upload area */}
+                            {!isImageScene && (
+                              <div>
+                                {(asset.has_video || v6UploadedVideos[idx]) ? (
+                                  <div>
+                                    <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, marginBottom: '0.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Uploaded Video</div>
+                                    <video controls src={asset.video_url} style={{ width: '100%', maxHeight: '300px', borderRadius: '0.5rem', background: '#000' }} />
+                                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                      <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                                        🔄 Replace
+                                        <input type="file" accept=".mp4,video/mp4" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) v6UploadVideo(idx, e.target.files[0]) }} />
+                                      </label>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div style={{ border: '2px dashed rgba(245,158,11,0.3)', borderRadius: '0.75rem', padding: '1.5rem', textAlign: 'center', background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.03)' }}>
+                                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎥</div>
+                                    <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', opacity: 0.7 }}>
+                                      Generate a clip using the prompt above, then upload the .mp4 file
+                                    </p>
+                                    <label className="btn btn-primary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                                      {v6Uploading === idx ? <><span className="spinner"></span> Uploading...</> : <>📤 Upload Video (.mp4)</>}
+                                      <input type="file" accept=".mp4,video/mp4" style={{ display: 'none' }} disabled={v6Uploading === idx} onChange={e => { if (e.target.files?.[0]) v6UploadVideo(idx, e.target.files[0]) }} />
+                                    </label>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : videoVersion === 'v5' ? (
                     /* V5 Asset Dashboard: upload video clips for each scene */
                     <div className="review-grid" style={{ gridTemplateColumns: '1fr' }}>
                       {reviewAssets.map((asset, idx) => (
@@ -1628,7 +1986,36 @@ function App() {
                     </div>
                   )}
 
-                  {videoVersion === 'v5' ? (
+                  {videoVersion === 'v6' ? (
+                    /* V6: Approve button (video scenes must all be uploaded) */
+                    <div className="review-actions">
+                      {!v6AllVideoScenesUploaded() ? (
+                        <div style={{
+                          padding: '0.75rem 1rem',
+                          background: 'rgba(245,158,11,0.1)',
+                          border: '1px solid rgba(245,158,11,0.25)',
+                          borderRadius: '0.5rem',
+                          textAlign: 'center',
+                          fontSize: '0.9rem',
+                        }}>
+                          ⏳ Upload video clips for all video scenes to proceed
+                          <span style={{ marginLeft: '0.5rem', fontWeight: 600 }}>
+                            ({reviewAssets.filter((a, i) => a.media_type !== 'video' || a.has_video || v6UploadedVideos[i]).length}/{reviewAssets.length})
+                          </span>
+                        </div>
+                      ) : (
+                        <div>
+                          <button
+                            className="btn btn-success btn-block btn-glow"
+                            onClick={() => { approveAssets() }}
+                            disabled={assetsApproved}
+                          >
+                            {assetsApproved ? '✅ All Scenes Ready' : '✅ Confirm All Scenes & Continue'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : videoVersion === 'v5' ? (
                     /* V5: Show progress indicator + prepare button when all videos uploaded */
                     <div className="review-actions">
                       {!v5AllVideosUploaded() ? (
