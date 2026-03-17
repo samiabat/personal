@@ -11,3 +11,4 @@ together
 requests
 numpy
 librosa
+elevenlabs
