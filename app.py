@@ -4,7 +4,7 @@ import json
 import asyncio
 import shutil
 from pathlib import Path
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,12 +48,21 @@ class V2Scene(BaseModel):
     visual_beats: list[VisualBeat]
 
 
+class V5Scene(BaseModel):
+    voiceover: str
+    prompt: str
+    media_type: str = "video"
+    time_fit_strategy: str = "auto"  # "auto", "trim", "cinematic_slow_mo", "loop_or_freeze"
+
+
 class VideoRequest(BaseModel):
-    version: str = "v1"  # "v1", "v2", or "v3"
+    version: str = "v1"  # "v1", "v2", "v3", or "v5"
     # V1 fields
     scenes: list[Scene] = []
     # V2/V3 fields
     v2_scenes: list[V2Scene] = []
+    # V5 fields
+    v5_scenes: list[V5Scene] = []
     # Common fields
     speech_provider: str = "google"  # "google" or "openai"
     speech_model: str = "gemini-2.5-pro-preview-tts"
@@ -562,6 +571,99 @@ def run_video_generation(job_id: str, request: VideoRequest):
         job["progress"] = job.get("progress", 0)
 
 
+# ── V5 pipeline ─────────────────────────────────────────────────────────────
+
+def run_v5_tts_generation(job_id: str, request: VideoRequest):
+    """Background task: generate TTS audio for every V5 scene.
+
+    Video clips are uploaded manually by the user via the Asset Dashboard,
+    so this only produces the voiceover audio files.
+    """
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+
+    total = len(request.v5_scenes)
+
+    try:
+        for idx, scene in enumerate(request.v5_scenes):
+            audio_path = f"{job_dir}/v5_scene_{idx}_audio.wav"
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                job["message"] = f"V5 Scene {idx + 1}/{total}: Audio exists, skipping..."
+            else:
+                job["message"] = f"V5 Scene {idx + 1}/{total}: Generating voiceover..."
+                job["status"] = "processing"
+                if request.speech_provider == "openai":
+                    from openai_services import generate_audio_openai
+                    generate_audio_openai(
+                        scene.voiceover, audio_path,
+                        model=request.speech_model,
+                        voice=request.speech_voice,
+                        api_key=request.openai_api_key or "",
+                    )
+                else:
+                    from gemini_services import generate_audio
+                    generate_audio(
+                        scene.voiceover, audio_path,
+                        model=request.speech_model,
+                        voice=request.speech_voice,
+                        api_key=request.gemini_api_key or "",
+                    )
+            job["progress"] = int(((idx + 1) / total) * 100)
+
+        job["progress"] = 100
+        job["status"] = "assets_ready"
+        job["message"] = "V5 voiceover audio generated! Upload video clips to proceed."
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
+def run_v5_video_assembly(job_id: str, request: VideoRequest):
+    """Background task: assemble V5 video from uploaded clips + TTS audio."""
+    job = jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+
+    try:
+        job["progress"] = 5
+        job["status"] = "processing"
+        job["message"] = "V5: Assembling video with time-remapping..."
+
+        from v5_editor import assemble_v5_video
+
+        scene_dicts = [s.model_dump() for s in request.v5_scenes]
+        output_path = assemble_v5_video(
+            scene_dicts,
+            job_dir,
+            output_filename="output.mp4",
+            resolution=request.resolution,
+            orientation=request.orientation,
+            enable_subtitles=request.enable_subtitles,
+            subtitle_style=request.subtitle_style,
+        )
+
+        # Clean up temp files
+        job["progress"] = 90
+        job["message"] = "Cleaning up temporary files..."
+        for idx in range(len(request.v5_scenes)):
+            for suffix in ("audio.wav", "video.mp4"):
+                p = f"{job_dir}/v5_scene_{idx}_{suffix}"
+                if os.path.exists(p):
+                    os.remove(p)
+
+        job["progress"] = 100
+        job["status"] = "completed"
+        job["message"] = "V5 video generation completed!"
+        job["output_path"] = output_path
+
+    except Exception as e:
+        job["status"] = "failed"
+        job["message"] = f"Error: {str(e)}"
+        job["progress"] = job.get("progress", 0)
+
+
 @app.post("/api/generate-video")
 async def generate_video(request: VideoRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
@@ -577,6 +679,8 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
         background_tasks.add_task(run_v2_video_generation, job_id, request)
     elif request.version == "v3":
         background_tasks.add_task(run_v3_video_generation, job_id, request)
+    elif request.version == "v5":
+        background_tasks.add_task(run_v5_tts_generation, job_id, request)
     else:
         background_tasks.add_task(run_video_generation, job_id, request)
     return {"job_id": job_id}
@@ -600,7 +704,9 @@ async def retry_job(job_id: str, background_tasks: BackgroundTasks):
     job["message"] = "Retrying job..."
     job["output_path"] = None
 
-    if request.version == "v3":
+    if request.version == "v5":
+        background_tasks.add_task(run_v5_tts_generation, job_id, request)
+    elif request.version == "v3":
         background_tasks.add_task(run_v3_video_generation, job_id, request)
     elif request.version == "v2":
         background_tasks.add_task(run_v2_video_generation, job_id, request)
@@ -621,7 +727,9 @@ async def generate_assets(request: VideoRequest, background_tasks: BackgroundTas
         "output_path": None,
         "request": request.model_dump(),
     }
-    if request.version in ("v2", "v3"):
+    if request.version == "v5":
+        background_tasks.add_task(run_v5_tts_generation, job_id, request)
+    elif request.version in ("v2", "v3"):
         background_tasks.add_task(run_v2_asset_generation, job_id, request)
     else:
         background_tasks.add_task(run_asset_generation, job_id, request)
@@ -641,6 +749,25 @@ async def get_job_assets(job_id: str):
     job_dir = f"{JOBS_DIR}/{job_id}"
 
     version = request_data.get("version", "v1")
+
+    if version == "v5":
+        assets = []
+        for s_idx, scene in enumerate(request_data.get("v5_scenes", [])):
+            audio_path = f"{job_dir}/v5_scene_{s_idx}_audio.wav"
+            video_path = f"{job_dir}/v5_scene_{s_idx}_video.mp4"
+            assets.append({
+                "scene_index": s_idx,
+                "voiceover": scene["voiceover"],
+                "prompt": scene["prompt"],
+                "media_type": scene.get("media_type", "video"),
+                "time_fit_strategy": scene.get("time_fit_strategy", "auto"),
+                "has_audio": os.path.exists(audio_path) and os.path.getsize(audio_path) > 0,
+                "audio_url": f"/api/v5-scene-audio/{job_id}/{s_idx}",
+                "has_video": os.path.exists(video_path) and os.path.getsize(video_path) > 0,
+                "video_url": f"/api/v5-scene-video/{job_id}/{s_idx}",
+            })
+        total = len(request_data.get("v5_scenes", []))
+        return {"job_id": job_id, "version": "v5", "total_scenes": total, "assets": assets}
 
     if version in ("v2", "v3"):
         assets = []
@@ -721,7 +848,9 @@ async def get_scene_audio(job_id: str, scene_index: int):
         raise HTTPException(status_code=404, detail="Job not found")
     job = jobs[job_id]
     version = job["request"].get("version", "v1")
-    if version in ("v2", "v3"):
+    if version == "v5":
+        audio_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_audio.wav"
+    elif version in ("v2", "v3"):
         audio_path = f"{JOBS_DIR}/{job_id}/v2_scene_{scene_index}_audio.wav"
     else:
         audio_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_audio.wav"
@@ -879,7 +1008,9 @@ async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
     job["message"] = "Preparing video..."
     job["output_path"] = None
 
-    if request.version == "v3":
+    if request.version == "v5":
+        background_tasks.add_task(run_v5_video_assembly, job_id, request)
+    elif request.version == "v3":
         background_tasks.add_task(run_v3_video_assembly, job_id, request)
     elif request.version == "v2":
         background_tasks.add_task(run_v2_video_assembly, job_id, request)
@@ -934,6 +1065,96 @@ async def download_video(job_id: str):
         media_type="video/mp4",
         filename="generated_video.mp4"
     )
+
+
+@app.post("/api/v5-upload-video/{job_id}/{scene_index}")
+async def v5_upload_video(job_id: str, scene_index: int, file: UploadFile = File(...)):
+    """Upload a video clip for a specific V5 scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    version = job["request"].get("version", "v1")
+    if version != "v5":
+        raise HTTPException(status_code=400, detail="This endpoint is only for V5 jobs")
+
+    v5_scenes = job["request"].get("v5_scenes", [])
+    if scene_index < 0 or scene_index >= len(v5_scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+
+    if not file.filename or not file.filename.lower().endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="Only .mp4 files are accepted")
+
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+    video_path = f"{job_dir}/v5_scene_{scene_index}_video.mp4"
+
+    try:
+        contents = await file.read()
+        with open(video_path, "wb") as f:
+            f.write(contents)
+        return {
+            "success": True,
+            "message": f"Video uploaded for scene {scene_index + 1}",
+            "video_url": f"/api/v5-scene-video/{job_id}/{scene_index}",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v5-scene-video/{job_id}/{scene_index}")
+async def get_v5_scene_video(job_id: str, scene_index: int):
+    """Serve an uploaded V5 scene video clip."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    video_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_video.mp4"
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(
+        video_path, media_type="video/mp4",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
+
+
+@app.get("/api/v5-scene-audio/{job_id}/{scene_index}")
+async def get_v5_scene_audio(job_id: str, scene_index: int):
+    """Serve the TTS audio for a V5 scene."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    audio_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_audio.wav"
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return FileResponse(audio_path, media_type="audio/wav")
+
+
+@app.get("/api/v5-dashboard-status/{job_id}")
+async def v5_dashboard_status(job_id: str):
+    """Check whether all V5 scenes have an uploaded video clip."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    v5_scenes = job["request"].get("v5_scenes", [])
+    job_dir = f"{JOBS_DIR}/{job_id}"
+
+    scene_status = []
+    all_ready = True
+    for idx in range(len(v5_scenes)):
+        has_video = (
+            os.path.exists(f"{job_dir}/v5_scene_{idx}_video.mp4")
+            and os.path.getsize(f"{job_dir}/v5_scene_{idx}_video.mp4") > 0
+        )
+        has_audio = (
+            os.path.exists(f"{job_dir}/v5_scene_{idx}_audio.wav")
+            and os.path.getsize(f"{job_dir}/v5_scene_{idx}_audio.wav") > 0
+        )
+        if not has_video:
+            all_ready = False
+        scene_status.append({
+            "scene_index": idx,
+            "has_video": has_video,
+            "has_audio": has_audio,
+        })
+
+    return {"all_ready": all_ready, "scenes": scene_status}
 
 
 @app.post("/api/test-audio")
