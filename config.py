@@ -30,7 +30,13 @@ def get_together_client(api_key: str = ""):
     return Together(api_key=key)
 
 def get_elevenlabs_client(api_key: str = ""):
-    from elevenlabs.client import ElevenLabs
+    try:
+        from elevenlabs.client import ElevenLabs
+    except ImportError:
+        raise ImportError(
+            "The 'elevenlabs' package is not installed. "
+            "Run: pip install elevenlabs"
+        )
     key = api_key or ELEVENLABS_API_KEY
     if not key:
         raise ValueError("ELEVENLABS_API_KEY not provided. Add it in Settings or set it in .env file.")

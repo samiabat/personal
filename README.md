@@ -9,7 +9,7 @@ A full-stack web application that generates AI-powered videos from text scenes. 
 ## ✨ Features
 
 - **🎥 Video Generation** — Define scenes with voiceover text and image prompts, generate a complete MP4 video
-- **🔊 Multiple Speech Providers** — Choose between Google Gemini TTS or OpenAI TTS
+- **🔊 Multiple Speech Providers** — Choose between Google Gemini TTS, OpenAI TTS, or ElevenLabs TTS
 - **🖼️ Flexible Image Models** — Select from preset image models or enter a custom model name
 - **🎙️ Voice Selection** — Pick from available voices or type a custom voice name
 - **📐 Resolution Control** — Choose output resolution (480p, 720p, 1080p, 1440p, 4K)
@@ -25,6 +25,7 @@ A full-stack web application that generates AI-powered videos from text scenes. 
 ├── config.py              # API key configuration
 ├── gemini_services.py     # Google Gemini audio & image generation
 ├── openai_services.py     # OpenAI TTS generation
+├── elevenlabs_services.py # ElevenLabs TTS generation
 ├── video_editor.py        # Video assembly with MoviePy
 ├── script_content.py      # Default scene content
 ├── main.py                # CLI entry point (standalone usage)
@@ -50,6 +51,7 @@ A full-stack web application that generates AI-powered videos from text scenes. 
 - API key(s):
   - **Google Gemini API key** (for image generation and Google TTS)
   - **OpenAI API key** (optional, only if using OpenAI TTS)
+  - **ElevenLabs API key** (optional, only if using ElevenLabs TTS)
 
 ### 1. Clone the repository
 
@@ -64,7 +66,8 @@ Create a `.env` file in the project root:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-OPENAI_API_KEY=your_openai_api_key_here  # Optional
+OPENAI_API_KEY=your_openai_api_key_here      # Optional — only for OpenAI TTS
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here  # Optional — only for ElevenLabs TTS
 ```
 
 ### 3. Install Python dependencies
@@ -170,6 +173,8 @@ This helps verify that your API keys and model selections are working correctly 
 | OpenAI | `tts-1` | OpenAI TTS-1 |
 | OpenAI | `tts-1-hd` | OpenAI TTS-1 HD |
 | OpenAI | `gpt-4o-mini-tts` | GPT-4o Mini TTS |
+| ElevenLabs | `eleven_multilingual_v2` | ElevenLabs Multilingual v2 (default) |
+| ElevenLabs | `eleven_turbo_v2_5` | ElevenLabs Turbo v2.5 (low latency) |
 
 > 💡 You can also type a custom model name for any provider.
 
@@ -203,6 +208,7 @@ This uses the default scenes from `script_content.py` and generates `assets/fina
 - `uvicorn[standard]` — ASGI server
 - `python-multipart` — Form data parsing
 - `openai` — OpenAI API client
+- `elevenlabs` — ElevenLabs TTS client
 - `sse-starlette` — Server-Sent Events for FastAPI
 
 ## 📄 License
