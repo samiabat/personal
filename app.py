@@ -78,7 +78,7 @@ class VideoRequest(BaseModel):
     # V6 fields
     v6_scenes: list[V6Scene] = []
     # Common fields
-    speech_provider: str = "google"  # "google" or "openai"
+    speech_provider: str = "google"  # "google", "openai", or "elevenlabs"
     speech_model: str = "gemini-2.5-pro-preview-tts"
     speech_voice: str = "Charon"
     image_provider: str = "gemini"  # "gemini", "openai", or "togetherai"
@@ -98,6 +98,7 @@ class VideoRequest(BaseModel):
     gemini_api_key: Optional[str] = ""
     openai_api_key: Optional[str] = ""
     together_api_key: Optional[str] = ""
+    elevenlabs_api_key: Optional[str] = ""
 
 class TestAudioRequest(BaseModel):
     text: str
@@ -106,6 +107,7 @@ class TestAudioRequest(BaseModel):
     speech_voice: str = "Charon"
     gemini_api_key: Optional[str] = ""
     openai_api_key: Optional[str] = ""
+    elevenlabs_api_key: Optional[str] = ""
 
 class TestImageRequest(BaseModel):
     prompt: str
@@ -119,6 +121,34 @@ class TestImageRequest(BaseModel):
     gemini_api_key: Optional[str] = ""
     openai_api_key: Optional[str] = ""
     together_api_key: Optional[str] = ""
+
+
+def _generate_audio_for_provider(provider: str, text: str, audio_path: str, **kwargs):
+    """Route TTS audio generation to the correct provider."""
+    if provider == "openai":
+        from openai_services import generate_audio_openai
+        return generate_audio_openai(
+            text, audio_path,
+            model=kwargs.get("speech_model", "tts-1"),
+            voice=kwargs.get("speech_voice", "alloy"),
+            api_key=kwargs.get("openai_api_key", ""),
+        )
+    elif provider == "elevenlabs":
+        from elevenlabs_services import generate_audio_elevenlabs
+        return generate_audio_elevenlabs(
+            text, audio_path,
+            model=kwargs.get("speech_model", "eleven_multilingual_v2"),
+            voice=kwargs.get("speech_voice", "21m00Tcm4TlvDq8ikWAM"),
+            api_key=kwargs.get("elevenlabs_api_key", ""),
+        )
+    else:  # google
+        from gemini_services import generate_audio
+        return generate_audio(
+            text, audio_path,
+            model=kwargs.get("speech_model", "gemini-2.5-pro-preview-tts"),
+            voice=kwargs.get("speech_voice", "Charon"),
+            api_key=kwargs.get("gemini_api_key", ""),
+        )
 
 
 def _generate_image_for_provider(provider: str, prompt: str, image_path: str, **kwargs):
@@ -174,12 +204,14 @@ def run_asset_generation(job_id: str, request: VideoRequest):
                 job["message"] = f"Scene {index + 1}/{total_scenes}: Audio already exists, skipping..."
             else:
                 job["message"] = f"Scene {index + 1}/{total_scenes}: Generating audio..."
-                if request.speech_provider == "openai":
-                    from openai_services import generate_audio_openai
-                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.openai_api_key or "")
-                else:
-                    from gemini_services import generate_audio
-                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.gemini_api_key or "")
+                _generate_audio_for_provider(
+                    request.speech_provider, scene.voiceover, audio_path,
+                    speech_model=request.speech_model,
+                    speech_voice=request.speech_voice,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    elevenlabs_api_key=request.elevenlabs_api_key or "",
+                )
 
             # Generate image (skip if already exists - resume support)
             if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
@@ -285,18 +317,14 @@ def run_v2_asset_generation(job_id: str, request: VideoRequest):
             else:
                 job["message"] = f"V2 Scene {s_idx + 1}/{total_scenes}: Generating voiceover..."
                 job["status"] = "processing"
-                if request.speech_provider == "openai":
-                    from openai_services import generate_audio_openai
-                    generate_audio_openai(scene.voiceover, audio_path,
-                                          model=request.speech_model,
-                                          voice=request.speech_voice,
-                                          api_key=request.openai_api_key or "")
-                else:
-                    from gemini_services import generate_audio
-                    generate_audio(scene.voiceover, audio_path,
-                                   model=request.speech_model,
-                                   voice=request.speech_voice,
-                                   api_key=request.gemini_api_key or "")
+                _generate_audio_for_provider(
+                    request.speech_provider, scene.voiceover, audio_path,
+                    speech_model=request.speech_model,
+                    speech_voice=request.speech_voice,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    elevenlabs_api_key=request.elevenlabs_api_key or "",
+                )
 
             # --- Images (one per prompt) ---
             for p_idx, prompt in enumerate(scene.prompts):
@@ -523,12 +551,14 @@ def run_video_generation(job_id: str, request: VideoRequest):
                 job["message"] = f"Scene {index + 1}/{total_scenes}: Audio already exists, skipping..."
             else:
                 job["message"] = f"Scene {index + 1}/{total_scenes}: Generating audio..."
-                if request.speech_provider == "openai":
-                    from openai_services import generate_audio_openai
-                    generate_audio_openai(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.openai_api_key or "")
-                else:
-                    from gemini_services import generate_audio
-                    generate_audio(scene.voiceover, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.gemini_api_key or "")
+                _generate_audio_for_provider(
+                    request.speech_provider, scene.voiceover, audio_path,
+                    speech_model=request.speech_model,
+                    speech_voice=request.speech_voice,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    elevenlabs_api_key=request.elevenlabs_api_key or "",
+                )
 
             # Generate image (skip if already exists - resume support)
             if os.path.exists(image_path) and os.path.getsize(image_path) > 0:
@@ -607,22 +637,14 @@ def run_v5_tts_generation(job_id: str, request: VideoRequest):
             else:
                 job["message"] = f"V5 Scene {idx + 1}/{total}: Generating voiceover..."
                 job["status"] = "processing"
-                if request.speech_provider == "openai":
-                    from openai_services import generate_audio_openai
-                    generate_audio_openai(
-                        scene.voiceover, audio_path,
-                        model=request.speech_model,
-                        voice=request.speech_voice,
-                        api_key=request.openai_api_key or "",
-                    )
-                else:
-                    from gemini_services import generate_audio
-                    generate_audio(
-                        scene.voiceover, audio_path,
-                        model=request.speech_model,
-                        voice=request.speech_voice,
-                        api_key=request.gemini_api_key or "",
-                    )
+                _generate_audio_for_provider(
+                    request.speech_provider, scene.voiceover, audio_path,
+                    speech_model=request.speech_model,
+                    speech_voice=request.speech_voice,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    elevenlabs_api_key=request.elevenlabs_api_key or "",
+                )
             job["progress"] = int(((idx + 1) / total) * 100)
 
         job["progress"] = 100
@@ -703,22 +725,14 @@ def run_v6_asset_generation(job_id: str, request: VideoRequest):
                 job["message"] = f"V6 Scene {idx + 1}/{total}: Audio exists, skipping..."
             else:
                 job["message"] = f"V6 Scene {idx + 1}/{total}: Generating voiceover..."
-                if request.speech_provider == "openai":
-                    from openai_services import generate_audio_openai
-                    generate_audio_openai(
-                        scene.voiceover, audio_path,
-                        model=request.speech_model,
-                        voice=request.speech_voice,
-                        api_key=request.openai_api_key or "",
-                    )
-                else:
-                    from gemini_services import generate_audio
-                    generate_audio(
-                        scene.voiceover, audio_path,
-                        model=request.speech_model,
-                        voice=request.speech_voice,
-                        api_key=request.gemini_api_key or "",
-                    )
+                _generate_audio_for_provider(
+                    request.speech_provider, scene.voiceover, audio_path,
+                    speech_model=request.speech_model,
+                    speech_voice=request.speech_voice,
+                    gemini_api_key=request.gemini_api_key or "",
+                    openai_api_key=request.openai_api_key or "",
+                    elevenlabs_api_key=request.elevenlabs_api_key or "",
+                )
 
             # ── AI image (image scenes only) ──
             if scene.media_type == "image":
@@ -1500,12 +1514,14 @@ async def test_audio(request: TestAudioRequest):
     audio_path = f"{test_dir}/test_audio.wav"
 
     try:
-        if request.speech_provider == "openai":
-            from openai_services import generate_audio_openai
-            success = generate_audio_openai(request.text, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.openai_api_key or "")
-        else:
-            from gemini_services import generate_audio
-            success = generate_audio(request.text, audio_path, model=request.speech_model, voice=request.speech_voice, api_key=request.gemini_api_key or "")
+        success = _generate_audio_for_provider(
+            request.speech_provider, request.text, audio_path,
+            speech_model=request.speech_model,
+            speech_voice=request.speech_voice,
+            gemini_api_key=request.gemini_api_key or "",
+            openai_api_key=request.openai_api_key or "",
+            elevenlabs_api_key=request.elevenlabs_api_key or "",
+        )
 
         if success:
             return FileResponse(audio_path, media_type="audio/wav", filename="test_audio.wav")
@@ -1552,6 +1568,7 @@ async def get_models():
         "speech_providers": [
             {"value": "google", "label": "Google Gemini"},
             {"value": "openai", "label": "OpenAI"},
+            {"value": "elevenlabs", "label": "ElevenLabs"},
         ],
         "speech_models": {
             "google": [
@@ -1562,6 +1579,12 @@ async def get_models():
                 {"value": "tts-1", "label": "TTS-1"},
                 {"value": "tts-1-hd", "label": "TTS-1 HD"},
                 {"value": "gpt-4o-mini-tts", "label": "GPT-4o Mini TTS"},
+            ],
+            "elevenlabs": [
+                {"value": "eleven_multilingual_v2", "label": "Multilingual v2"},
+                {"value": "eleven_turbo_v2_5", "label": "Turbo v2.5"},
+                {"value": "eleven_flash_v2_5", "label": "Flash v2.5"},
+                {"value": "eleven_turbo_v2", "label": "Turbo v2"},
             ],
         },
         "speech_voices": {
@@ -1585,6 +1608,18 @@ async def get_models():
                 {"value": "ash", "label": "Ash"},
                 {"value": "coral", "label": "Coral"},
                 {"value": "sage", "label": "Sage"},
+            ],
+            "elevenlabs": [
+                {"value": "21m00Tcm4TlvDq8ikWAM", "label": "Rachel (Female, Calm)"},
+                {"value": "AZnzlk1XvdvUeBnXmlld", "label": "Domi (Female, Strong)"},
+                {"value": "EXAVITQu4vr4xnSDxMaL", "label": "Bella (Female, Soft)"},
+                {"value": "ErXwobaYiN019PkySvjV", "label": "Antoni (Male, Warm)"},
+                {"value": "MF3mGyEYCl7XYWbV9V6O", "label": "Elli (Female, Emotional)"},
+                {"value": "TxGEqnHWrfWFTfGW9XjX", "label": "Josh (Male, Deep)"},
+                {"value": "VR6AewLTigWG4xSOukaG", "label": "Arnold (Male, Crisp)"},
+                {"value": "pNInz6obpgDQGcFmaJgB", "label": "Adam (Male, Deep)"},
+                {"value": "yoZ06aMxZJJ28mfd3POQ", "label": "Sam (Male, Raspy)"},
+                {"value": "XB0fDUnXU5powFXDhCwa", "label": "Charlotte (Female, Confident)"},
             ],
         },
         "image_providers": [

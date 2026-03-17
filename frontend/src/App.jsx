@@ -79,6 +79,7 @@ function App() {
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [togetherApiKey, setTogetherApiKey] = useState('')
+  const [elevenlabsApiKey, setElevenlabsApiKey] = useState('')
   const [apiKeysSaved, setApiKeysSaved] = useState(false)
 
   // Generation settings
@@ -415,6 +416,7 @@ function App() {
       gemini_api_key: geminiApiKey,
       openai_api_key: openaiApiKey,
       together_api_key: togetherApiKey,
+      elevenlabs_api_key: elevenlabsApiKey,
     }
 
     if (videoVersion === 'v5') {
@@ -838,6 +840,7 @@ function App() {
           speech_voice: getActiveVoice(),
           gemini_api_key: geminiApiKey,
           openai_api_key: openaiApiKey,
+          elevenlabs_api_key: elevenlabsApiKey,
         }),
       })
 
@@ -1138,7 +1141,7 @@ function App() {
               </div>
               <div className="features-grid">
                 {[
-                  { icon: '🎙️', title: 'AI Voiceover', desc: 'Natural-sounding text-to-speech using Google Gemini or OpenAI. Choose from dozens of voices and models.' },
+                  { icon: '🎙️', title: 'AI Voiceover', desc: 'Natural-sounding text-to-speech using Google Gemini, OpenAI, or ElevenLabs. Choose from dozens of voices and models.' },
                   { icon: '🖼️', title: 'AI Image Generation', desc: 'Generate stunning visuals with Gemini, OpenAI DALL·E, or Together AI FLUX models.' },
                   { icon: '🎬', title: 'Automated Assembly', desc: 'Audio and images are automatically assembled into polished videos with transitions and effects.' },
                   { icon: '🔍', title: 'Ken Burns Effects', desc: 'Add cinematic zoom and pan effects to bring static images to life in your videos.' },
@@ -2595,6 +2598,21 @@ function App() {
                     placeholder="Enter your Together AI API key..."
                     value={togetherApiKey}
                     onChange={e => { setTogetherApiKey(e.target.value); setApiKeysSaved(false) }}
+                  />
+                </div>
+                <div className="api-key-item">
+                  <div className="api-key-header">
+                    <span className="api-key-provider">🎙️ ElevenLabs</span>
+                    <span className={`api-key-status ${elevenlabsApiKey ? 'configured' : ''}`}>
+                      {elevenlabsApiKey ? '● Configured' : '○ Not set'}
+                    </span>
+                  </div>
+                  <p className="api-key-desc">Used for ElevenLabs TTS voices — ultra-realistic speech synthesis with multilingual and turbo models.</p>
+                  <input
+                    type="password"
+                    placeholder="Enter your ElevenLabs API key..."
+                    value={elevenlabsApiKey}
+                    onChange={e => { setElevenlabsApiKey(e.target.value); setApiKeysSaved(false) }}
                   />
                 </div>
               </div>
