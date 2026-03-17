@@ -2,11 +2,15 @@
 V5 Video Editor – Smart Time-Remapping Engine
 ==============================================
 Handles AI-generated 6-second video clips (e.g. from Grok) and fits them to
-variable-length TTS voiceover audio using three strategies:
+variable-length TTS voiceover audio using two strategies:
 
-  * **trim**              – audio < 6 s → trim video to match.
-  * **cinematic_slow_mo** – 6 s < audio ≤ 12 s → time-stretch the clip.
-  * **loop_or_freeze**    – audio > 12 s → loop/ping-pong + freeze-frame.
+  * **trim**              – audio ≤ clip length → trim video to match.
+  * **cinematic_slow_mo** – audio > clip length → time-stretch the clip to
+                            exactly match the voiceover, no matter how long.
+                            This prevents boring loop repetition.
+
+``loop_or_freeze`` is still available as an explicit ``time_fit_strategy``
+override but is no longer selected automatically.
 
 All uploaded clips have their original audio **stripped** so only the
 voiceover track is present in the final output.
@@ -27,7 +31,6 @@ from moviepy.video.fx import TimeMirror
 
 # ── Constants ────────────────────────────────────────────────────────────────
 GROK_CLIP_DURATION = 6.0          # seconds – canonical Grok clip length
-SLOW_MO_CEILING    = 12.0         # above this → loop / freeze instead of slow-mo
 FPS                = 24
 
 
@@ -102,19 +105,22 @@ def fit_clip_to_audio(
     ----------
     strategy : str
         ``"auto"``               – choose automatically based on ratio.
+                                   Trims when audio ≤ clip length; otherwise
+                                   slows the clip down to match the voiceover
+                                   (no looping).
         ``"trim"``               – always trim.
-        ``"cinematic_slow_mo"``  – always slow-mo.
-        ``"loop_or_freeze"``     – always loop / ping-pong.
+        ``"cinematic_slow_mo"``  – always slow-mo (stretch to audio length).
+        ``"loop_or_freeze"``     – always loop / ping-pong (legacy override).
     """
     clip_dur = clip.duration
 
     if strategy == "auto":
         if audio_duration <= clip_dur:
             strategy = "trim"
-        elif audio_duration <= SLOW_MO_CEILING:
-            strategy = "cinematic_slow_mo"
         else:
-            strategy = "loop_or_freeze"
+            # Always slow-mo: stretch the clip to fill the entire voiceover.
+            # This avoids the repetitive loop effect for long voiceovers.
+            strategy = "cinematic_slow_mo"
 
     if strategy == "trim":
         return _trim_clip(clip, audio_duration)
