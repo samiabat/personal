@@ -2048,6 +2048,12 @@ textarea.scene-editor {
   letter-spacing: 0.05em;
 }
 
+.provider-tag-default {
+  background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(139,92,246,0.14));
+  border-color: rgba(99,102,241,0.5);
+  color: #a5b4fc;
+}
+
 /* CTA Section */
 .cta-section {
   padding-bottom: 1rem;

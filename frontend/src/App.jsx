@@ -85,15 +85,15 @@ function App() {
   // Generation settings
   const [scenesText, setScenesText] = useState('')
   const [videoVersion, setVideoVersion] = useState('v1') // 'v1', 'v2', 'v3', 'v5', or 'v6'
-  const [speechProvider, setSpeechProvider] = useState('google')
-  const [speechModel, setSpeechModel] = useState('gemini-2.5-pro-preview-tts')
+  const [speechProvider, setSpeechProvider] = useState('elevenlabs')
+  const [speechModel, setSpeechModel] = useState('eleven_multilingual_v2')
   const [customSpeechModel, setCustomSpeechModel] = useState('')
   const [useCustomSpeechModel, setUseCustomSpeechModel] = useState(false)
-  const [speechVoice, setSpeechVoice] = useState('Charon')
+  const [speechVoice, setSpeechVoice] = useState('21m00Tcm4TlvDq8ikWAM')
   const [customVoice, setCustomVoice] = useState('')
   const [useCustomVoice, setUseCustomVoice] = useState(false)
-  const [imageProvider, setImageProvider] = useState('gemini')
-  const [imageModel, setImageModel] = useState('gemini-3.1-flash-image-preview')
+  const [imageProvider, setImageProvider] = useState('togetherai')
+  const [imageModel, setImageModel] = useState('black-forest-labs/FLUX.1-schnell')
   const [customImageModel, setCustomImageModel] = useState('')
   const [useCustomImageModel, setUseCustomImageModel] = useState(false)
   const [resolution, setResolution] = useState('1080p')
@@ -158,6 +158,15 @@ function App() {
   const [selectedCrypto, setSelectedCrypto] = useState(null)
   const [paymentCopied, setPaymentCopied] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  // My Videos history (persisted in localStorage)
+  const [myVideos, setMyVideos] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('omniva_my_videos') || '[]') } catch { return [] }
+  })
+
+  // Time-fit editor (shown after video is completed for V5/V6)
+  const [timeFitEdits, setTimeFitEdits] = useState({}) // { sceneIndex: strategy }
+  const [timeFitSaving, setTimeFitSaving] = useState(false)
 
   const cryptoOptions = [
     { id: 'usdc', name: 'USDC', icon: '💲', network: 'Ethereum / Polygon', address: '0x1234...your-usdc-address' },
@@ -309,6 +318,19 @@ function App() {
         }
         if (data.status === 'completed') {
           setWorkflowStep(4) // completed
+          // Save to My Videos history
+          setMyVideos(prev => {
+            const entry = {
+              jobId: id,
+              timestamp: Date.now(),
+              version: videoVersion,
+            }
+            const updated = [entry, ...prev.filter(v => v.jobId !== id)].slice(0, 50)
+            try { localStorage.setItem('omniva_my_videos', JSON.stringify(updated)) } catch { /* ignore storage errors */ }
+            return updated
+          })
+          // Initialise time-fit editor from current request scenes
+          setTimeFitEdits({})
         }
         setIsGenerating(false)
       }
@@ -816,7 +838,16 @@ function App() {
       } else {
         setIsGenerating(false)
         if (data.status === 'failed') setError(data.message)
-        if (data.status === 'completed') setWorkflowStep(4)
+        if (data.status === 'completed') {
+          setWorkflowStep(4)
+          setMyVideos(prev => {
+            const entry = { jobId: id, timestamp: Date.now(), version: videoVersion }
+            const updated = [entry, ...prev.filter(v => v.jobId !== id)].slice(0, 50)
+            try { localStorage.setItem('omniva_my_videos', JSON.stringify(updated)) } catch { /* ignore storage errors */ }
+            return updated
+          })
+          setTimeFitEdits({})
+        }
       }
     } catch {
       setTimeout(() => pollStatus(id), 3000)
@@ -1057,6 +1088,7 @@ function App() {
             {[
               { key: 'home', label: 'Home' },
               { key: 'create', label: 'Create' },
+              { key: 'myvideos', label: 'My Videos' },
               { key: 'test', label: 'Test Lab' },
               { key: 'templates', label: 'Templates' },
               { key: 'pricing', label: 'Pricing' },
@@ -1218,7 +1250,15 @@ function App() {
                   <h3>Together AI</h3>
                   <p>Open-source image models including FLUX.1, Stable Diffusion XL, and DreamShaper for fast, affordable generation.</p>
                   <div className="provider-tags">
-                    <span className="provider-tag">Images</span>
+                    <span className="provider-tag provider-tag-default">Default Images</span>
+                  </div>
+                </div>
+                <div className="provider-card">
+                  <div className="provider-icon">🎙️</div>
+                  <h3>ElevenLabs</h3>
+                  <p>Ultra-realistic AI voices with multilingual support, turbo, and flash models for the most natural-sounding narration.</p>
+                  <div className="provider-tags">
+                    <span className="provider-tag provider-tag-default">Default Speech</span>
                   </div>
                 </div>
               </div>
@@ -2217,6 +2257,79 @@ function App() {
                     </div>
                   </div>
 
+                  {/* ─ Time-fit Strategy Editor (V5 / V6 video-clip scenes) ─ */}
+                  {(videoVersion === 'v5' || videoVersion === 'v6') && reviewAssets.length > 0 && (
+                    <div style={{
+                      marginTop: '1.5rem',
+                      background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.06))',
+                      border: '1px solid rgba(99,102,241,0.3)',
+                      borderRadius: '0.75rem',
+                      padding: '1.25rem',
+                    }}>
+                      <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.05rem' }}>⏱️ Adjust Time-Fit &amp; Re-render</h3>
+                      <p className="muted" style={{ margin: '0 0 1rem 0', fontSize: '0.85rem' }}>
+                        Change how video clips are fitted to the voiceover length, then re-render without regenerating audio or images.
+                      </p>
+                      {reviewAssets.map((asset, idx) => {
+                        const isVideoScene = videoVersion === 'v5' || asset.media_type === 'video'
+                        if (!isVideoScene) return null
+                        const currentStrategy = timeFitEdits[idx] !== undefined
+                          ? timeFitEdits[idx]
+                          : (asset.time_fit_strategy || 'auto')
+                        return (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.6rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.85rem', minWidth: '5rem' }}>
+                              Scene {idx + 1}
+                            </span>
+                            <select
+                              value={currentStrategy}
+                              onChange={e => setTimeFitEdits(prev => ({ ...prev, [idx]: e.target.value }))}
+                              style={{ flex: 1, minWidth: '12rem', maxWidth: '18rem' }}
+                            >
+                              <option value="auto">Auto (smart fit)</option>
+                              <option value="trim">Trim to voiceover</option>
+                              <option value="cinematic_slow_mo">Cinematic Slow-Mo</option>
+                              <option value="loop_or_freeze">Loop / Freeze</option>
+                            </select>
+                          </div>
+                        )
+                      })}
+                      <button
+                        className="btn btn-primary"
+                        style={{ marginTop: '0.75rem' }}
+                        disabled={timeFitSaving || isGenerating}
+                        onClick={async () => {
+                          if (!jobId) return
+                          setTimeFitSaving(true)
+                          setError('')
+                          try {
+                            // Push all edits to backend
+                            for (const [idxStr, strategy] of Object.entries(timeFitEdits)) {
+                              const idx = parseInt(idxStr, 10)
+                              const res = await fetch(`${API_BASE}/update-time-fit/${jobId}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ scene_index: idx, time_fit_strategy: strategy }),
+                              })
+                              if (!res.ok) {
+                                const err = await res.json()
+                                throw new Error(err.detail || 'Failed to update scene')
+                              }
+                            }
+                            // Re-render
+                            await prepareVideo()
+                          } catch (err) {
+                            setError(err.message)
+                          } finally {
+                            setTimeFitSaving(false)
+                          }
+                        }}
+                      >
+                        {timeFitSaving ? <><span className="spinner"></span> Saving...</> : <>🔄 Re-render with New Settings</>}
+                      </button>
+                    </div>
+                  )}
+
                   <button
                     className="btn btn-secondary btn-block"
                     style={{ marginTop: '1rem' }}
@@ -2234,6 +2347,7 @@ function App() {
                       setDirectorReviewDone(false)
                       setV5UploadedVideos({})
                       setV5CopiedIndex(null)
+                      setTimeFitEdits({})
                     }}
                   >
                     🔄 Start New Video
@@ -2241,6 +2355,91 @@ function App() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* ─── My Videos Page ─── */}
+        {activeTab === 'myvideos' && (
+          <div className="page-content">
+            <div className="page-header">
+              <h1>📼 My Videos</h1>
+              <p className="page-subtitle">All previously generated videos. Click a job to download or re-render with updated settings.</p>
+            </div>
+
+            {myVideos.length === 0 ? (
+              <div className="card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
+                <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🎬</div>
+                <p style={{ color: 'var(--text-muted)' }}>No videos generated yet. Head to the <strong>Create</strong> tab to get started.</p>
+                <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setActiveTab('create')}>
+                  ➕ Create First Video
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {myVideos.map((entry) => (
+                  <div key={entry.jobId} className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: '1.25rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '12rem' }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '0.25rem' }}>
+                        Job <code style={{ fontSize: '0.8rem', background: 'var(--bg-tertiary)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>{entry.jobId.slice(0, 8)}…</code>
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                        Version: <strong>{entry.version?.toUpperCase() ?? 'V1'}</strong>
+                        &nbsp;·&nbsp;
+                        {new Date(entry.timestamp).toLocaleDateString()} {new Date(entry.timestamp).toLocaleTimeString()}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <a
+                        href={`${API_BASE}/download/${entry.jobId}`}
+                        download
+                        className="btn btn-success"
+                        style={{ textDecoration: 'none' }}
+                      >
+                        ⬇️ Download
+                      </a>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          // Navigate to create tab and restore this job
+                          setJobId(entry.jobId)
+                          setVideoVersion(entry.version ?? 'v1')
+                          setWorkflowStep(4)
+                          setJobStatus('completed')
+                          setActiveTab('create')
+                        }}
+                      >
+                        🔍 View / Re-render
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}
+                        onClick={() => {
+                          setMyVideos(prev => {
+                            const updated = prev.filter(v => v.jobId !== entry.jobId)
+                            try { localStorage.setItem('omniva_my_videos', JSON.stringify(updated)) } catch { /* ignore storage errors */ }
+                            return updated
+                          })
+                        }}
+                      >
+                        🗑️ Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  className="btn btn-secondary"
+                  style={{ alignSelf: 'flex-start', marginTop: '0.5rem' }}
+                  onClick={() => {
+                    if (window.confirm('Clear all history? This only removes the list entries — actual video files on the server are not deleted.')) {
+                      setMyVideos([])
+                      try { localStorage.removeItem('omniva_my_videos') } catch { /* ignore storage errors */ }
+                    }
+                  }}
+                >
+                  🗑️ Clear History
+                </button>
+              </div>
+            )}
           </div>
         )}
 
