@@ -263,17 +263,6 @@ def run_video_assembly(job_id: str, request: VideoRequest):
             enable_shake=request.enable_shake,
         )
 
-        # Clean up temp files
-        job["progress"] = 90
-        job["message"] = "Cleaning up temporary files..."
-        for index in range(total_scenes):
-            audio_path = f"{job_dir}/scene_{index}_audio.wav"
-            image_path = f"{job_dir}/scene_{index}_image.jpg"
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            if os.path.exists(image_path):
-                os.remove(image_path)
-
         job["progress"] = 100
         job["status"] = "completed"
         job["message"] = "Video generation completed!"
@@ -408,17 +397,10 @@ def run_v2_video_assembly(job_id: str, request: VideoRequest):
             final_output = f"{job_dir}/output.mp4"
             final.write_videofile(final_output, fps=24, codec="libx264", audio_codec="aac")
 
-        # Clean up temp files
+        # Clean up only intermediate per-scene output files (not audio/images — kept for re-use)
         job["progress"] = 90
-        job["message"] = "Cleaning up temporary files..."
-        for s_idx, scene in enumerate(request.v2_scenes):
-            audio_path = f"{job_dir}/v2_scene_{s_idx}_audio.wav"
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            for p_idx in range(len(scene.prompts)):
-                img_path = f"{job_dir}/v2_scene_{s_idx}_image_{p_idx}.jpg"
-                if os.path.exists(img_path):
-                    os.remove(img_path)
+        job["message"] = "Finalising video..."
+        for s_idx in range(len(request.v2_scenes)):
             scene_output = f"{job_dir}/v2_scene_{s_idx}_output.mp4"
             if os.path.exists(scene_output):
                 os.remove(scene_output)
@@ -502,16 +484,10 @@ def run_v3_video_assembly(job_id: str, request: VideoRequest):
             final_output = f"{job_dir}/output.mp4"
             final.write_videofile(final_output, fps=24, codec="libx264", audio_codec="aac")
 
+        # Clean up only intermediate per-scene output files (not audio/images — kept for re-use)
         job["progress"] = 90
-        job["message"] = "Cleaning up temporary files..."
-        for s_idx, scene in enumerate(request.v2_scenes):
-            audio_path = f"{job_dir}/v2_scene_{s_idx}_audio.wav"
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            for p_idx in range(len(scene.prompts)):
-                img_path = f"{job_dir}/v2_scene_{s_idx}_image_{p_idx}.jpg"
-                if os.path.exists(img_path):
-                    os.remove(img_path)
+        job["message"] = "Finalising video..."
+        for s_idx in range(len(request.v2_scenes)):
             scene_output = f"{job_dir}/v2_scene_{s_idx}_output.mp4"
             if os.path.exists(scene_output):
                 os.remove(scene_output)
@@ -593,17 +569,6 @@ def run_video_generation(job_id: str, request: VideoRequest):
             enable_shake=request.enable_shake,
         )
 
-        # Clean up temp files
-        job["progress"] = 98
-        job["message"] = "Cleaning up temporary files..."
-        for index in range(total_scenes):
-            audio_path = f"{job_dir}/scene_{index}_audio.wav"
-            image_path = f"{job_dir}/scene_{index}_image.jpg"
-            if os.path.exists(audio_path):
-                os.remove(audio_path)
-            if os.path.exists(image_path):
-                os.remove(image_path)
-
         job["progress"] = 100
         job["status"] = "completed"
         job["message"] = "Video generation completed!"
@@ -679,15 +644,6 @@ def run_v5_video_assembly(job_id: str, request: VideoRequest):
             enable_subtitles=request.enable_subtitles,
             subtitle_style=request.subtitle_style,
         )
-
-        # Clean up temp files
-        job["progress"] = 90
-        job["message"] = "Cleaning up temporary files..."
-        for idx in range(len(request.v5_scenes)):
-            for suffix in ("audio.wav", "video.mp4"):
-                p = f"{job_dir}/v5_scene_{idx}_{suffix}"
-                if os.path.exists(p):
-                    os.remove(p)
 
         job["progress"] = 100
         job["status"] = "completed"
@@ -788,20 +744,6 @@ def run_v6_video_assembly(job_id: str, request: VideoRequest):
             enable_subtitles=request.enable_subtitles,
             subtitle_style=request.subtitle_style,
         )
-
-        # Clean up temp files
-        job["progress"] = 90
-        job["message"] = "Cleaning up temporary files..."
-        for idx, scene in enumerate(request.v6_scenes):
-            audio_p = f"{job_dir}/v6_scene_{idx}_audio.wav"
-            if os.path.exists(audio_p):
-                os.remove(audio_p)
-            image_p = f"{job_dir}/v6_scene_{idx}_image.jpg"
-            if os.path.exists(image_p):
-                os.remove(image_p)
-            video_p = f"{job_dir}/v6_scene_{idx}_video.mp4"
-            if os.path.exists(video_p):
-                os.remove(video_p)
 
         job["progress"] = 100
         job["status"] = "completed"
@@ -1188,7 +1130,7 @@ async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = jobs[job_id]
-    if job["status"] != "approved":
+    if job["status"] not in ("approved", "completed"):
         raise HTTPException(status_code=400, detail="Assets must be approved before video preparation")
 
     request = VideoRequest(**job["request"])
@@ -1212,7 +1154,58 @@ async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
     return {"job_id": job_id}
 
 
-@app.get("/api/progress/{job_id}")
+class TimeFitUpdate(BaseModel):
+    scene_index: int
+    time_fit_strategy: str  # "auto", "trim", "cinematic_slow_mo", "loop_or_freeze"
+
+
+@app.post("/api/update-time-fit/{job_id}")
+async def update_time_fit(job_id: str, update: TimeFitUpdate):
+    """Update the time_fit_strategy for a V5 or V6 video-clip scene so the user
+    can re-render without regenerating audio or images."""
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    request_data = job["request"]
+    version = request_data.get("version", "v1")
+
+    valid_strategies = {"auto", "trim", "cinematic_slow_mo", "loop_or_freeze"}
+    if update.time_fit_strategy not in valid_strategies:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy. Must be one of: {valid_strategies}")
+
+    if version == "v5":
+        scenes = request_data.get("v5_scenes", [])
+        if update.scene_index < 0 or update.scene_index >= len(scenes):
+            raise HTTPException(status_code=400, detail="Invalid scene index")
+        scenes[update.scene_index]["time_fit_strategy"] = update.time_fit_strategy
+    elif version == "v6":
+        scenes = request_data.get("v6_scenes", [])
+        if update.scene_index < 0 or update.scene_index >= len(scenes):
+            raise HTTPException(status_code=400, detail="Invalid scene index")
+        if scenes[update.scene_index].get("media_type", "image") != "video":
+            raise HTTPException(status_code=400, detail="Scene is not a video scene")
+        scenes[update.scene_index]["time_fit_strategy"] = update.time_fit_strategy
+    else:
+        raise HTTPException(status_code=400, detail="time_fit_strategy only applies to V5 and V6 jobs")
+
+    return {"success": True, "scene_index": update.scene_index, "time_fit_strategy": update.time_fit_strategy}
+
+
+@app.get("/api/list-jobs")
+async def list_jobs():
+    """Return summary of all in-memory jobs (for My Videos history tab)."""
+    summary = []
+    for jid, job in jobs.items():
+        req = job.get("request", {})
+        summary.append({
+            "id": jid,
+            "status": job["status"],
+            "progress": job["progress"],
+            "message": job["message"],
+            "version": req.get("version", "v1"),
+            "has_output": bool(job.get("output_path") and os.path.exists(job["output_path"])),
+        })
+    return {"jobs": summary}
 async def get_progress(job_id: str, request: Request):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
