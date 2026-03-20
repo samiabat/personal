@@ -29,6 +29,66 @@ os.makedirs(JOBS_DIR, exist_ok=True)
 jobs = {}
 
 
+def _job_entry_from_disk(job_id: str, request_data: dict) -> dict:
+    """Build a job dict from disk state (used on startup and in _ensure_job_in_memory)."""
+    status, output_path = _detect_disk_status(job_id, request_data)
+    progress = 100 if status == "completed" else (80 if status == "assets_ready" else 0)
+    message = {
+        "completed": "Loaded from disk -- video ready.",
+        "assets_ready": "Loaded from disk -- assets ready for review.",
+        "failed": "Loaded from disk -- previous run did not finish.",
+    }.get(status, "Loaded from disk.")
+    return {
+        "id": job_id,
+        "status": status,
+        "progress": progress,
+        "message": message,
+        "output_path": output_path,
+        "request": request_data,
+    }
+
+
+@app.on_event("startup")
+async def _load_all_jobs_from_disk():
+    """On server start, scan the jobs directory and load all existing jobs into memory
+    so they are immediately accessible without requiring manual recovery."""
+    if not os.path.isdir(JOBS_DIR):
+        return
+    for job_id in os.listdir(JOBS_DIR):
+        if job_id in jobs:
+            continue
+        job_dir = f"{JOBS_DIR}/{job_id}"
+        request_path = f"{job_dir}/request.json"
+        if not os.path.isdir(job_dir) or not os.path.exists(request_path):
+            continue
+        try:
+            with open(request_path) as f:
+                request_data = json.load(f)
+            jobs[job_id] = _job_entry_from_disk(job_id, request_data)
+        except Exception as exc:
+            print(f"[startup] Skipping job {job_id}: {exc}")
+
+
+def _ensure_job_in_memory(job_id: str) -> dict:
+    """Return in-memory job dict, auto-loading from disk if not present.
+
+    Raises HTTPException(404) if the job cannot be found on disk either.
+    """
+    if job_id in jobs:
+        return jobs[job_id]
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    request_path = f"{job_dir}/request.json"
+    if not os.path.isdir(job_dir) or not os.path.exists(request_path):
+        raise HTTPException(status_code=404, detail="Job not found")
+    try:
+        with open(request_path) as f:
+            request_data = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read job metadata: {e}")
+    jobs[job_id] = _job_entry_from_disk(job_id, request_data)
+    return jobs[job_id]
+
+
 def _save_job_metadata(job_id: str, request_data: dict):
     """Persist job request data to disk so it can be resumed after server restarts."""
     job_dir = f"{JOBS_DIR}/{job_id}"
@@ -817,9 +877,7 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
 @app.post("/api/retry/{job_id}")
 async def retry_job(job_id: str, background_tasks: BackgroundTasks):
     """Retry a failed job, resuming from where it left off (skipping existing assets)."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] != "failed":
         raise HTTPException(status_code=400, detail="Only failed jobs can be retried")
 
@@ -873,27 +931,7 @@ async def generate_assets(request: VideoRequest, background_tasks: BackgroundTas
 @app.get("/api/job-assets/{job_id}")
 async def get_job_assets(job_id: str):
     """Return list of generated assets for a job so user can review them."""
-    # Auto-load from disk if job not in memory
-    if job_id not in jobs:
-        job_dir = f"{JOBS_DIR}/{job_id}"
-        request_path = f"{job_dir}/request.json"
-        if not os.path.isdir(job_dir) or not os.path.exists(request_path):
-            raise HTTPException(status_code=404, detail="Job not found")
-        try:
-            with open(request_path) as f:
-                request_data = json.load(f)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to read job metadata: {e}")
-        status, output_path = _detect_disk_status(job_id, request_data)
-        jobs[job_id] = {
-            "id": job_id,
-            "status": status,
-            "progress": 100 if status == "completed" else 80,
-            "message": "Loaded from disk.",
-            "output_path": output_path,
-            "request": request_data,
-        }
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] not in ("assets_ready", "approved", "completed"):
         raise HTTPException(status_code=400, detail=f"Assets not ready (status: {job['status']})")
 
@@ -1055,9 +1093,7 @@ async def get_scene_audio(job_id: str, scene_index: int):
 @app.post("/api/regenerate-image/{job_id}/{scene_index}")
 async def regenerate_image(job_id: str, scene_index: int):
     """Regenerate a specific scene's image."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] != "assets_ready":
         raise HTTPException(status_code=400, detail="Assets not ready for regeneration")
 
@@ -1099,9 +1135,7 @@ async def regenerate_image(job_id: str, scene_index: int):
 @app.post("/api/regenerate-v2-image/{job_id}/{scene_index}/{prompt_index}")
 async def regenerate_v2_image(job_id: str, scene_index: int, prompt_index: int):
     """Regenerate a specific V2 scene image."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] != "assets_ready":
         raise HTTPException(status_code=400, detail="Assets not ready for regeneration")
 
@@ -1144,9 +1178,7 @@ async def regenerate_v2_image(job_id: str, scene_index: int, prompt_index: int):
 @app.post("/api/approve-assets/{job_id}")
 async def approve_assets(job_id: str):
     """Mark assets as approved, enabling video assembly."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] != "assets_ready":
         raise HTTPException(status_code=400, detail="Assets not in reviewable state")
     job["status"] = "approved"
@@ -1164,9 +1196,7 @@ class FocusPointUpdate(BaseModel):
 @app.post("/api/update-focus-point/{job_id}")
 async def update_focus_point(job_id: str, update: FocusPointUpdate):
     """Save a director-selected focus point into a V3 visual beat."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
 
     v2_scenes = job["request"].get("v2_scenes", [])
     if update.scene_index < 0 or update.scene_index >= len(v2_scenes):
@@ -1187,9 +1217,7 @@ async def update_focus_point(job_id: str, update: FocusPointUpdate):
 @app.post("/api/prepare-video/{job_id}")
 async def prepare_video(job_id: str, background_tasks: BackgroundTasks):
     """Assemble video from approved assets."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] not in ("approved", "completed"):
         raise HTTPException(status_code=400, detail="Assets must be approved before video preparation")
 
@@ -1223,9 +1251,7 @@ class TimeFitUpdate(BaseModel):
 async def update_time_fit(job_id: str, update: TimeFitUpdate):
     """Update the time_fit_strategy for a V5 or V6 video-clip scene so the user
     can re-render without regenerating audio or images."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     request_data = job["request"]
     version = request_data.get("version", "v1")
 
@@ -1328,9 +1354,11 @@ async def load_job(job_id: str):
         "request": request_data,
     }
     return {"job_id": job_id, "status": status, "version": request_data.get("version", "v1")}
+
+
+@app.get("/api/progress/{job_id}")
 async def get_progress(job_id: str, request: Request):
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+    _ensure_job_in_memory(job_id)  # raises 404 if not found on disk either
 
     async def event_generator():
         while True:
@@ -1356,9 +1384,7 @@ async def get_progress(job_id: str, request: Request):
 
 @app.get("/api/status/{job_id}")
 async def get_status(job_id: str):
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return jobs[job_id]
+    return _ensure_job_in_memory(job_id)
 
 
 @app.get("/api/download/{job_id}")
@@ -1378,9 +1404,7 @@ async def download_video(job_id: str):
 @app.post("/api/v5-upload-video/{job_id}/{scene_index}")
 async def v5_upload_video(job_id: str, scene_index: int, file: UploadFile = File(...)):
     """Upload a video clip for a specific V5 scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     version = job["request"].get("version", "v1")
     if version != "v5":
         raise HTTPException(status_code=400, detail="This endpoint is only for V5 jobs")
@@ -1433,9 +1457,7 @@ async def get_v5_scene_audio(job_id: str, scene_index: int):
 @app.get("/api/v5-dashboard-status/{job_id}")
 async def v5_dashboard_status(job_id: str):
     """Check whether all V5 scenes have an uploaded video clip."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     v5_scenes = job["request"].get("v5_scenes", [])
     job_dir = f"{JOBS_DIR}/{job_id}"
 
@@ -1499,9 +1521,7 @@ async def get_v6_scene_video(job_id: str, scene_index: int):
 @app.post("/api/v6-upload-video/{job_id}/{scene_index}")
 async def v6_upload_video(job_id: str, scene_index: int, file: UploadFile = File(...)):
     """Upload a video clip for a specific V6 video scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     version = job["request"].get("version", "v1")
     if version != "v6":
         raise HTTPException(status_code=400, detail="This endpoint is only for V6 jobs")
@@ -1544,9 +1564,7 @@ class V6FocusPointUpdate(BaseModel):
 @app.post("/api/v6-update-scene/{job_id}")
 async def v6_update_scene(job_id: str, update: V6FocusPointUpdate):
     """Save focus point and optional zoom effect for a V6 image scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
 
     v6_scenes = job["request"].get("v6_scenes", [])
     if update.scene_index < 0 or update.scene_index >= len(v6_scenes):
@@ -1569,9 +1587,7 @@ async def v6_update_scene(job_id: str, update: V6FocusPointUpdate):
 @app.post("/api/v6-regenerate-image/{job_id}/{scene_index}")
 async def v6_regenerate_image(job_id: str, scene_index: int):
     """Regenerate the AI image for a specific V6 image scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
+    job = _ensure_job_in_memory(job_id)
     if job["status"] != "assets_ready":
         raise HTTPException(status_code=400, detail="Assets not ready for regeneration")
 
