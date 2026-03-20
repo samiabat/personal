@@ -20,7 +20,7 @@ def generate_audio_elevenlabs(
     text: str,
     output_path: str,
     model: str = "eleven_multilingual_v2",
-    voice: str = "21m00Tcm4TlvDq8ikWAM",
+    voice: str = "3TStB8f3X3To0Uj5R7RK",
     api_key: str = "",
 ) -> bool:
     """Generates voiceover using ElevenLabs TTS and saves as WAV to output_path."""
