@@ -89,7 +89,7 @@ function App() {
   const [speechModel, setSpeechModel] = useState('eleven_multilingual_v2')
   const [customSpeechModel, setCustomSpeechModel] = useState('')
   const [useCustomSpeechModel, setUseCustomSpeechModel] = useState(false)
-  const [speechVoice, setSpeechVoice] = useState('21m00Tcm4TlvDq8ikWAM')
+  const [speechVoice, setSpeechVoice] = useState('3TStB8f3X3To0Uj5R7RK')
   const [customVoice, setCustomVoice] = useState('')
   const [useCustomVoice, setUseCustomVoice] = useState(false)
   const [imageProvider, setImageProvider] = useState('togetherai')
@@ -981,7 +981,7 @@ function App() {
             </label>
           </label>
           {useCustomVoice ? (
-            <input type="text" placeholder="Enter custom voice name..." value={customVoice} onChange={e => setCustomVoice(e.target.value)} />
+            <input type="text" placeholder="Enter ElevenLabs Voice ID..." value={customVoice} onChange={e => setCustomVoice(e.target.value)} />
           ) : (
             <select value={speechVoice} onChange={e => setSpeechVoice(e.target.value)}>
               {models?.speech_voices[speechProvider]?.map(v => (
@@ -2399,13 +2399,23 @@ function App() {
                       </a>
                       <button
                         className="btn btn-secondary"
-                        onClick={() => {
-                          // Navigate to create tab and restore this job
+                        onClick={async () => {
+                          // Load job from disk into server memory first, then navigate
+                          try { await fetch(`${API_BASE}/load-job/${entry.jobId}`, { method: 'POST' }) } catch { /* ignore */ }
                           setJobId(entry.jobId)
                           setVideoVersion(entry.version ?? 'v1')
                           setWorkflowStep(4)
                           setJobStatus('completed')
+                          setReviewAssets([])
                           setActiveTab('create')
+                          // Load review assets so the re-render section is populated
+                          try {
+                            const r = await fetch(`${API_BASE}/job-assets/${entry.jobId}`)
+                            if (r.ok) {
+                              const d = await r.json()
+                              setReviewAssets(d.assets || [])
+                            }
+                          } catch { /* ignore */ }
                         }}
                       >
                         🔍 View / Re-render
@@ -2440,6 +2450,86 @@ function App() {
                 </button>
               </div>
             )}
+
+            {/* ─── Recover Jobs from Disk ─── */}
+            <div className="card" style={{ marginTop: '1.5rem' }}>
+              <div className="card-header">
+                <h2>💾 Recover Jobs from Disk</h2>
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                If the server restarted and you lost your history, scan the disk to find previously generated jobs. Audio and images are reused -- no regeneration cost.
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1rem' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch(`${API_BASE}/list-disk-jobs`)
+                      if (!res.ok) throw new Error('Failed to scan disk')
+                      const data = await res.json()
+                      const existingIds = new Set(myVideos.map(v => v.jobId))
+                      const newJobs = data.jobs.filter(j => !existingIds.has(j.id))
+                      if (newJobs.length === 0) {
+                        alert('No new jobs found on disk.')
+                        return
+                      }
+                      const toAdd = newJobs.map(j => ({
+                        jobId: j.id,
+                        timestamp: j.timestamp,
+                        version: j.version,
+                      }))
+                      setMyVideos(prev => {
+                        const updated = [...toAdd, ...prev].slice(0, 50)
+                        try { localStorage.setItem('omniva_my_videos', JSON.stringify(updated)) } catch { /* ignore */ }
+                        return updated
+                      })
+                      alert(`Found and imported ${newJobs.length} job(s) from disk.`)
+                    } catch (err) {
+                      alert('Error scanning disk: ' + err.message)
+                    }
+                  }}
+                >
+                  🔍 Scan Disk for Jobs
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder="Or enter a Job ID manually…"
+                  style={{ flex: 1, minWidth: '14rem', maxWidth: '28rem' }}
+                  id="manual-job-id-input"
+                />
+                <button
+                  className="btn btn-secondary"
+                  onClick={async () => {
+                    const input = document.getElementById('manual-job-id-input')
+                    const jid = input?.value?.trim()
+                    if (!jid) return
+                    try {
+                      const res = await fetch(`${API_BASE}/load-job/${jid}`, { method: 'POST' })
+                      if (!res.ok) {
+                        const err = await res.json()
+                        alert(err.detail || 'Job not found on disk')
+                        return
+                      }
+                      const data = await res.json()
+                      setMyVideos(prev => {
+                        const entry = { jobId: jid, timestamp: Date.now(), version: data.version }
+                        const updated = [entry, ...prev.filter(v => v.jobId !== jid)].slice(0, 50)
+                        try { localStorage.setItem('omniva_my_videos', JSON.stringify(updated)) } catch { /* ignore */ }
+                        return updated
+                      })
+                      if (input) input.value = ''
+                      alert(`Job ${jid.slice(0, 8)}… imported (status: ${data.status}).`)
+                    } catch (err) {
+                      alert('Error loading job: ' + err.message)
+                    }
+                  }}
+                >
+                  ➕ Import Job
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

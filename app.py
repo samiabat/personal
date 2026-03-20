@@ -28,6 +28,38 @@ os.makedirs(JOBS_DIR, exist_ok=True)
 # In-memory job tracking
 jobs = {}
 
+
+def _save_job_metadata(job_id: str, request_data: dict):
+    """Persist job request data to disk so it can be resumed after server restarts."""
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+    try:
+        with open(f"{job_dir}/request.json", "w") as f:
+            json.dump(request_data, f)
+    except Exception:
+        pass  # Non-fatal: in-memory job still works
+
+
+def _detect_disk_status(job_id: str, request_data: dict) -> tuple[str, str | None]:
+    """Inspect files on disk and return (status, output_path)."""
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    output_path = f"{job_dir}/output.mp4"
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        return "completed", output_path
+    # Check if any assets were generated
+    version = request_data.get("version", "v1")
+    if version == "v5":
+        audio_0 = f"{job_dir}/v5_scene_0_audio.wav"
+    elif version == "v6":
+        audio_0 = f"{job_dir}/v6_scene_0_audio.wav"
+    elif version in ("v2", "v3"):
+        audio_0 = f"{job_dir}/v2_scene_0_audio.wav"
+    else:
+        audio_0 = f"{job_dir}/scene_0_audio.wav"
+    if os.path.exists(audio_0) and os.path.getsize(audio_0) > 0:
+        return "assets_ready", None
+    return "failed", None
+
 class Scene(BaseModel):
     voiceover: str
     prompt: str
@@ -138,7 +170,7 @@ def _generate_audio_for_provider(provider: str, text: str, audio_path: str, **kw
         return generate_audio_elevenlabs(
             text, audio_path,
             model=kwargs.get("speech_model", "eleven_multilingual_v2"),
-            voice=kwargs.get("speech_voice", "21m00Tcm4TlvDq8ikWAM"),
+            voice=kwargs.get("speech_voice", "3TStB8f3X3To0Uj5R7RK"),
             api_key=kwargs.get("elevenlabs_api_key", ""),
         )
     else:  # google
@@ -759,14 +791,16 @@ def run_v6_video_assembly(job_id: str, request: VideoRequest):
 @app.post("/api/generate-video")
 async def generate_video(request: VideoRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())
+    request_data = request.model_dump()
     jobs[job_id] = {
         "id": job_id,
         "status": "queued",
         "progress": 0,
         "message": "Job queued...",
         "output_path": None,
-        "request": request.model_dump(),
+        "request": request_data,
     }
+    _save_job_metadata(job_id, request_data)
     if request.version == "v2":
         background_tasks.add_task(run_v2_video_generation, job_id, request)
     elif request.version == "v3":
@@ -815,14 +849,16 @@ async def retry_job(job_id: str, background_tasks: BackgroundTasks):
 async def generate_assets(request: VideoRequest, background_tasks: BackgroundTasks):
     """Generate audio and images only (no video assembly). Returns job_id for tracking."""
     job_id = str(uuid.uuid4())
+    request_data = request.model_dump()
     jobs[job_id] = {
         "id": job_id,
         "status": "queued",
         "progress": 0,
         "message": "Job queued...",
         "output_path": None,
-        "request": request.model_dump(),
+        "request": request_data,
     }
+    _save_job_metadata(job_id, request_data)
     if request.version == "v5":
         background_tasks.add_task(run_v5_tts_generation, job_id, request)
     elif request.version == "v6":
@@ -837,8 +873,26 @@ async def generate_assets(request: VideoRequest, background_tasks: BackgroundTas
 @app.get("/api/job-assets/{job_id}")
 async def get_job_assets(job_id: str):
     """Return list of generated assets for a job so user can review them."""
+    # Auto-load from disk if job not in memory
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+        job_dir = f"{JOBS_DIR}/{job_id}"
+        request_path = f"{job_dir}/request.json"
+        if not os.path.isdir(job_dir) or not os.path.exists(request_path):
+            raise HTTPException(status_code=404, detail="Job not found")
+        try:
+            with open(request_path) as f:
+                request_data = json.load(f)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to read job metadata: {e}")
+        status, output_path = _detect_disk_status(job_id, request_data)
+        jobs[job_id] = {
+            "id": job_id,
+            "status": status,
+            "progress": 100 if status == "completed" else 80,
+            "message": "Loaded from disk.",
+            "output_path": output_path,
+            "request": request_data,
+        }
     job = jobs[job_id]
     if job["status"] not in ("assets_ready", "approved", "completed"):
         raise HTTPException(status_code=400, detail=f"Assets not ready (status: {job['status']})")
@@ -947,8 +1001,6 @@ async def get_job_assets(job_id: str):
 @app.get("/api/scene-image/{job_id}/{scene_index}")
 async def get_scene_image(job_id: str, scene_index: int):
     """Serve a specific scene image for review."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     image_path = f"{JOBS_DIR}/{job_id}/scene_{scene_index}_image.jpg"
     if not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="Image not found")
@@ -961,8 +1013,6 @@ async def get_scene_image(job_id: str, scene_index: int):
 @app.get("/api/v2-scene-image/{job_id}/{scene_index}/{prompt_index}")
 async def get_v2_scene_image(job_id: str, scene_index: int, prompt_index: int):
     """Serve a specific V2 scene image for review."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     image_path = f"{JOBS_DIR}/{job_id}/v2_scene_{scene_index}_image_{prompt_index}.jpg"
     if not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="Image not found")
@@ -975,10 +1025,20 @@ async def get_v2_scene_image(job_id: str, scene_index: int, prompt_index: int):
 @app.get("/api/scene-audio/{job_id}/{scene_index}")
 async def get_scene_audio(job_id: str, scene_index: int):
     """Serve a specific scene audio for review (V1, V2, or V3)."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
-    version = job["request"].get("version", "v1")
+    # Determine version: check in-memory job first, then infer from files on disk
+    if job_id in jobs:
+        version = jobs[job_id]["request"].get("version", "v1")
+    else:
+        # Try to detect version from which audio file exists on disk
+        job_dir = f"{JOBS_DIR}/{job_id}"
+        if os.path.exists(f"{job_dir}/v5_scene_{scene_index}_audio.wav"):
+            version = "v5"
+        elif os.path.exists(f"{job_dir}/v6_scene_{scene_index}_audio.wav"):
+            version = "v6"
+        elif os.path.exists(f"{job_dir}/v2_scene_{scene_index}_audio.wav"):
+            version = "v2"
+        else:
+            version = "v1"
     if version == "v5":
         audio_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_audio.wav"
     elif version == "v6":
@@ -1206,6 +1266,68 @@ async def list_jobs():
             "has_output": bool(job.get("output_path") and os.path.exists(job["output_path"])),
         })
     return {"jobs": summary}
+
+
+@app.get("/api/list-disk-jobs")
+async def list_disk_jobs():
+    """Scan the jobs directory on disk and return all jobs found (for resume/recovery)."""
+    disk_jobs = []
+    if not os.path.isdir(JOBS_DIR):
+        return {"jobs": []}
+    for job_id in os.listdir(JOBS_DIR):
+        job_dir = f"{JOBS_DIR}/{job_id}"
+        request_path = f"{job_dir}/request.json"
+        if not os.path.isdir(job_dir) or not os.path.exists(request_path):
+            continue
+        try:
+            with open(request_path) as f:
+                request_data = json.load(f)
+            output_path = f"{job_dir}/output.mp4"
+            has_video = os.path.exists(output_path) and os.path.getsize(output_path) > 0
+            mtime = os.path.getmtime(request_path)
+            disk_jobs.append({
+                "id": job_id,
+                "version": request_data.get("version", "v1"),
+                "has_video": has_video,
+                "in_memory": job_id in jobs,
+                "timestamp": int(mtime * 1000),
+            })
+        except Exception:
+            continue
+    disk_jobs.sort(key=lambda x: x["timestamp"], reverse=True)
+    return {"jobs": disk_jobs}
+
+
+@app.post("/api/load-job/{job_id}")
+async def load_job(job_id: str):
+    """Load a job from disk into memory (for resuming after server restart)."""
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    request_path = f"{job_dir}/request.json"
+    if not os.path.isdir(job_dir) or not os.path.exists(request_path):
+        raise HTTPException(status_code=404, detail="Job not found on disk")
+    try:
+        with open(request_path) as f:
+            request_data = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read job metadata: {e}")
+
+    status, output_path = _detect_disk_status(job_id, request_data)
+    progress = 100 if status == "completed" else (80 if status == "assets_ready" else 0)
+    message = {
+        "completed": "Loaded from disk -- video ready.",
+        "assets_ready": "Loaded from disk -- assets ready for review.",
+        "failed": "Loaded from disk -- assets not found.",
+    }.get(status, "Loaded from disk.")
+
+    jobs[job_id] = {
+        "id": job_id,
+        "status": status,
+        "progress": progress,
+        "message": message,
+        "output_path": output_path,
+        "request": request_data,
+    }
+    return {"job_id": job_id, "status": status, "version": request_data.get("version", "v1")}
 async def get_progress(job_id: str, request: Request):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1241,16 +1363,16 @@ async def get_status(job_id: str):
 
 @app.get("/api/download/{job_id}")
 async def download_video(job_id: str):
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job = jobs[job_id]
-    if job["status"] != "completed" or not job.get("output_path"):
-        raise HTTPException(status_code=400, detail="Video not ready")
-    return FileResponse(
-        job["output_path"],
-        media_type="video/mp4",
-        filename="generated_video.mp4"
-    )
+    # Try in-memory job first
+    if job_id in jobs:
+        job = jobs[job_id]
+        if job["status"] == "completed" and job.get("output_path") and os.path.exists(job["output_path"]):
+            return FileResponse(job["output_path"], media_type="video/mp4", filename="generated_video.mp4")
+    # Fallback: serve directly from disk
+    output_path = f"{JOBS_DIR}/{job_id}/output.mp4"
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        return FileResponse(output_path, media_type="video/mp4", filename="generated_video.mp4")
+    raise HTTPException(status_code=404, detail="Video not found")
 
 
 @app.post("/api/v5-upload-video/{job_id}/{scene_index}")
@@ -1290,8 +1412,6 @@ async def v5_upload_video(job_id: str, scene_index: int, file: UploadFile = File
 @app.get("/api/v5-scene-video/{job_id}/{scene_index}")
 async def get_v5_scene_video(job_id: str, scene_index: int):
     """Serve an uploaded V5 scene video clip."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     video_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_video.mp4"
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video not found")
@@ -1304,8 +1424,6 @@ async def get_v5_scene_video(job_id: str, scene_index: int):
 @app.get("/api/v5-scene-audio/{job_id}/{scene_index}")
 async def get_v5_scene_audio(job_id: str, scene_index: int):
     """Serve the TTS audio for a V5 scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     audio_path = f"{JOBS_DIR}/{job_id}/v5_scene_{scene_index}_audio.wav"
     if not os.path.exists(audio_path):
         raise HTTPException(status_code=404, detail="Audio not found")
@@ -1348,8 +1466,6 @@ async def v5_dashboard_status(job_id: str):
 @app.get("/api/v6-scene-image/{job_id}/{scene_index}")
 async def get_v6_scene_image(job_id: str, scene_index: int):
     """Serve a generated image for a V6 image scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     image_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_image.jpg"
     if not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="Image not found")
@@ -1362,8 +1478,6 @@ async def get_v6_scene_image(job_id: str, scene_index: int):
 @app.get("/api/v6-scene-audio/{job_id}/{scene_index}")
 async def get_v6_scene_audio(job_id: str, scene_index: int):
     """Serve the TTS audio for a V6 scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     audio_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_audio.wav"
     if not os.path.exists(audio_path):
         raise HTTPException(status_code=404, detail="Audio not found")
@@ -1373,8 +1487,6 @@ async def get_v6_scene_audio(job_id: str, scene_index: int):
 @app.get("/api/v6-scene-video/{job_id}/{scene_index}")
 async def get_v6_scene_video(job_id: str, scene_index: int):
     """Serve an uploaded video clip for a V6 video scene."""
-    if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
     video_path = f"{JOBS_DIR}/{job_id}/v6_scene_{scene_index}_video.mp4"
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video not found")
@@ -1603,6 +1715,7 @@ async def get_models():
                 {"value": "sage", "label": "Sage"},
             ],
             "elevenlabs": [
+                {"value": "3TStB8f3X3To0Uj5R7RK", "label": "Samuel (Male, Natural) -- Default"},
                 {"value": "21m00Tcm4TlvDq8ikWAM", "label": "Rachel (Female, Calm)"},
                 {"value": "AZnzlk1XvdvUeBnXmlld", "label": "Domi (Female, Strong)"},
                 {"value": "EXAVITQu4vr4xnSDxMaL", "label": "Bella (Female, Soft)"},
