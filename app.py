@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from sse_starlette.sse import EventSourceResponse
+from PIL import Image as PILImage
+import io
 
 app = FastAPI(title="AI Video Generator", version="1.0.0")
 
@@ -1549,6 +1551,45 @@ async def v6_upload_video(job_id: str, scene_index: int, file: UploadFile = File
             "success": True,
             "message": f"Video uploaded for V6 scene {scene_index + 1}",
             "video_url": f"/api/v6-scene-video/{job_id}/{scene_index}",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v6-upload-image/{job_id}/{scene_index}")
+async def v6_upload_image(job_id: str, scene_index: int, file: UploadFile = File(...)):
+    """Upload a custom image for a specific V6 image scene (replaces AI-generated image)."""
+    job = _ensure_job_in_memory(job_id)
+    version = job["request"].get("version", "v1")
+    if version != "v6":
+        raise HTTPException(status_code=400, detail="This endpoint is only for V6 jobs")
+
+    v6_scenes = job["request"].get("v6_scenes", [])
+    if scene_index < 0 or scene_index >= len(v6_scenes):
+        raise HTTPException(status_code=400, detail="Invalid scene index")
+
+    scene = v6_scenes[scene_index]
+    if scene.get("media_type", "image") == "video":
+        raise HTTPException(status_code=400, detail="Scene is not an image scene")
+
+    allowed_extensions = (".jpg", ".jpeg", ".png", ".webp")
+    fname = (file.filename or "").lower()
+    if not any(fname.endswith(ext) for ext in allowed_extensions):
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, or WEBP images are accepted")
+
+    job_dir = f"{JOBS_DIR}/{job_id}"
+    os.makedirs(job_dir, exist_ok=True)
+    image_path = f"{job_dir}/v6_scene_{scene_index}_image.jpg"
+
+    try:
+        contents = await file.read()
+        # Convert any accepted format to JPEG using PIL
+        img = PILImage.open(io.BytesIO(contents)).convert("RGB")
+        img.save(image_path, "JPEG", quality=92)
+        return {
+            "success": True,
+            "message": f"Image uploaded for V6 scene {scene_index + 1}",
+            "image_url": f"/api/v6-scene-image/{job_id}/{scene_index}",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
