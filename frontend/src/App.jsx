@@ -2484,22 +2484,42 @@ function App() {
                       <button
                         className="btn btn-secondary"
                         onClick={async () => {
-                          // Load job from disk into server memory first, then navigate
-                          try { await fetch(`${API_BASE}/load-job/${entry.jobId}`, { method: 'POST' }) } catch { /* ignore */ }
-                          setJobId(entry.jobId)
-                          setVideoVersion(entry.version ?? 'v1')
-                          setWorkflowStep(4)
-                          setJobStatus('completed')
-                          setReviewAssets([])
-                          setActiveTab('create')
-                          // Load review assets so the re-render section is populated
+                          // Load job from disk into server memory and get actual status
+                          let loadedStatus = 'completed'
                           try {
-                            const r = await fetch(`${API_BASE}/job-assets/${entry.jobId}`)
-                            if (r.ok) {
-                              const d = await r.json()
-                              setReviewAssets(d.assets || [])
+                            const loadRes = await fetch(`${API_BASE}/load-job/${entry.jobId}`, { method: 'POST' })
+                            if (loadRes.ok) {
+                              const loadData = await loadRes.json()
+                              loadedStatus = loadData.status ?? 'completed'
                             }
                           } catch { /* ignore */ }
+                          setJobId(entry.jobId)
+                          setVideoVersion(entry.version ?? 'v1')
+                          setActiveTab('create')
+                          setReviewAssets([])
+                          // If assets are ready but video not yet rendered, go to upload/review step
+                          if (loadedStatus === 'assets_ready') {
+                            setJobStatus('assets_ready')
+                            try {
+                              const r = await fetch(`${API_BASE}/job-assets/${entry.jobId}`)
+                              if (r.ok) {
+                                const d = await r.json()
+                                setReviewAssets(d.assets || [])
+                              }
+                            } catch { /* ignore */ }
+                            setWorkflowStep(2)
+                          } else {
+                            setJobStatus('completed')
+                            // Load review assets so the re-render section is populated
+                            try {
+                              const r = await fetch(`${API_BASE}/job-assets/${entry.jobId}`)
+                              if (r.ok) {
+                                const d = await r.json()
+                                setReviewAssets(d.assets || [])
+                              }
+                            } catch { /* ignore */ }
+                            setWorkflowStep(4)
+                          }
                         }}
                       >
                         🔍 View / Re-render
