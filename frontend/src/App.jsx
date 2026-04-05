@@ -137,6 +137,7 @@ function App() {
   // V6 Asset Dashboard
   const [v6UploadedVideos, setV6UploadedVideos] = useState({}) // { sceneIndex: true } for video scenes
   const [v6Uploading, setV6Uploading] = useState(null) // scene index currently uploading
+  const [v6UploadingImage, setV6UploadingImage] = useState(null) // image scene currently uploading
   const [v6CopiedIndex, setV6CopiedIndex] = useState(null) // scene index whose prompt was copied
   const [v6RegeneratingIndex, setV6RegeneratingIndex] = useState(null) // image scene being regenerated
   // V6 Director mode: pick focus point on image scenes
@@ -638,6 +639,56 @@ function App() {
       setError(err.message)
     } finally {
       setV6RegeneratingIndex(null)
+    }
+  }
+
+  const v6UploadImage = async (sceneIndex, file) => {
+    if (!jobId || !file) return
+    setV6UploadingImage(sceneIndex)
+    setError('')
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      const res = await fetch(`${API_BASE}/v6-upload-image/${jobId}/${sceneIndex}`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.detail || 'Upload failed')
+      }
+      setReviewAssets(prev => prev.map((a, i) =>
+        i === sceneIndex ? { ...a, has_image: true, image_url: `${API_BASE}/v6-scene-image/${jobId}/${sceneIndex}?t=${Date.now()}` } : a
+      ))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setV6UploadingImage(null)
+    }
+  }
+
+  const v6PasteImage = async (sceneIndex) => {
+    if (!jobId) return
+    try {
+      const clipboardItems = await navigator.clipboard.read()
+      let imageBlob = null
+      for (const item of clipboardItems) {
+        const imageType = item.types.find(t => t.startsWith('image/'))
+        if (imageType) {
+          imageBlob = await item.getType(imageType)
+          break
+        }
+      }
+      if (!imageBlob) {
+        setError('No image found in clipboard. Copy an image first.')
+        return
+      }
+      const mimeToExt = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' }
+      const ext = mimeToExt[imageBlob.type] || 'jpg'
+      const file = new File([imageBlob], `paste.${ext}`, { type: imageBlob.type })
+      await v6UploadImage(sceneIndex, file)
+    } catch (err) {
+      setError('Paste failed: ' + (err.message || 'Could not read clipboard. Allow clipboard access and try again.'))
     }
   }
 
@@ -1728,8 +1779,8 @@ function App() {
                                 {asset.has_image ? (
                                   <div>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generated Image</div>
-                                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                                      <div style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Image</div>
+                                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                                         <select
                                           value={currentZoom}
                                           onChange={e => v6SaveFocusPoint(idx, currentFocus.x, currentFocus.y, e.target.value)}
@@ -1748,8 +1799,22 @@ function App() {
                                         >
                                           {isEditingFocus ? '✅ Done' : '🎯 Set Focus'}
                                         </button>
+                                        <label className="btn btn-secondary btn-sm" title="Upload your own image" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem' }}>
+                                          {v6UploadingImage === idx ? <><span className="spinner"></span></> : '📤'}
+                                          <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} disabled={v6UploadingImage === idx} onChange={e => { if (e.target.files?.[0]) v6UploadImage(idx, e.target.files[0]) }} />
+                                        </label>
                                         <button
                                           className="btn btn-secondary btn-sm"
+                                          title="Paste image from clipboard"
+                                          disabled={v6UploadingImage === idx}
+                                          onClick={() => v6PasteImage(idx)}
+                                          style={{ fontSize: '0.75rem' }}
+                                        >
+                                          {v6UploadingImage === idx ? <><span className="spinner"></span></> : '📋'}
+                                        </button>
+                                        <button
+                                          className="btn btn-secondary btn-sm"
+                                          title="Re-generate image with AI"
                                           disabled={v6RegeneratingIndex === idx}
                                           onClick={() => v6RegenerateImage(idx)}
                                           style={{ fontSize: '0.75rem' }}
@@ -1791,7 +1856,26 @@ function App() {
                                     )}
                                   </div>
                                 ) : (
-                                  <div style={{ padding: '1rem', textAlign: 'center', opacity: 0.6, fontSize: '0.85rem' }}>⏳ Image generating…</div>
+                                  <div style={{ border: '2px dashed rgba(168,85,247,0.3)', borderRadius: '0.75rem', padding: '1.25rem', textAlign: 'center', background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.03)' }}>
+                                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🖼️</div>
+                                    <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', opacity: 0.7 }}>
+                                      ⏳ AI image generating… or upload / paste your own image below
+                                    </p>
+                                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                      <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                                        {v6UploadingImage === idx ? <><span className="spinner"></span> Uploading...</> : <>📤 Upload Image</>}
+                                        <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style={{ display: 'none' }} disabled={v6UploadingImage === idx} onChange={e => { if (e.target.files?.[0]) v6UploadImage(idx, e.target.files[0]) }} />
+                                      </label>
+                                      <button
+                                        className="btn btn-secondary btn-sm"
+                                        disabled={v6UploadingImage === idx}
+                                        onClick={() => v6PasteImage(idx)}
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                                      >
+                                        {v6UploadingImage === idx ? <><span className="spinner"></span> Uploading...</> : <>📋 Paste Image</>}
+                                      </button>
+                                    </div>
+                                  </div>
                                 )}
                               </div>
                             )}
